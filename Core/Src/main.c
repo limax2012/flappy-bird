@@ -52,7 +52,7 @@ SPI_HandleTypeDef hspi2;
 
 /* USER CODE BEGIN PV */
 
-const int BIRD_W = 5, BIRD_H = 3; // Viewing screen horizontally
+const int BIRD_W = 4, BIRD_H = 4;
 const float ACCEL = 0.3f, JUMP_VEL = -4.0f;
 const int MAX_POS = 127 - BIRD_W;
 
@@ -74,15 +74,35 @@ static void MX_SPI2_Init(void);
 /* USER CODE BEGIN 0 */
 
 void OLED_Init() {
-  uint8_t cmds[] = { 0x00, 0xA8, 0x3F, 0xD3, 0x00, 0x40, 0xA1, 0xC8, 0xDA, 0x02,
-      0x81, 0x7F, 0xA4, 0xA6, 0xD5, 0x80, 0x8D, 0x14, 0xAF };
+  uint8_t cmds[] = { 0x00,  // Control byte for commands
+      0xAE,        // Display OFF
+      0xD5, 0x80,  // Set display clock divide ratio/oscillator frequency
+      0xA8, 0x3F,  // Set multiplex ratio (height - 1)
+      0xD3, 0x00,  // Set display offset
+      0x40,        // Set start line to 0
+      0x8D, 0x14,  // Enable charge pump
+      0x20, 0x00,  // Set memory addressing mode to horizontal
+      0xA1,        // Set segment re-map (mirror horizontally)
+      0xC8,        // Set COM output scan direction (remapped mode)
+      0xDA, 0x12,  // Set COM pins hardware configuration
+      0x81, 0x7F,  // Set contrast control
+      0xD9, 0xF1,  // Set pre-charge period
+      0xDB, 0x40,  // Set VCOMH deselect level
+      0xA4,        // Resume display from RAM content
+      0xA6,        // Set normal display (not inverted)
+      0xAF         // Display ON
+      };
+
   HAL_I2C_Master_Transmit(&hi2c1, SSD1306_I2C_ADDR << 1, cmds, sizeof(cmds),
       100);
+
+  HAL_Delay(100);
 }
 
 void OLED_Clear() {
-  uint8_t set_mode[] = { 0x00, 0x20, 0x00 };
-  HAL_I2C_Master_Transmit(&hi2c1, SSD1306_I2C_ADDR << 1, set_mode, 3, 100);
+  uint8_t horizontal_mode[] = { 0x00, 0x20, 0x00 };
+  HAL_I2C_Master_Transmit(&hi2c1, SSD1306_I2C_ADDR << 1, horizontal_mode, 3,
+      100);
 
   for (uint8_t page = 0; page < 8; page++) {
     uint8_t set_page_col[] = { 0x00, 0xB0 | page, 0x00, 0x10 };
