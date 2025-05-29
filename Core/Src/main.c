@@ -18,6 +18,7 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
+#include "cmsis_os.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
@@ -50,10 +51,26 @@ I2C_HandleTypeDef hi2c1;
 
 SPI_HandleTypeDef hspi2;
 
+/* Definitions for GameTask */
+osThreadId_t GameTaskHandle;
+const osThreadAttr_t GameTask_attributes = { .name = "GameTask", .stack_size =
+    256 * 4, .priority = (osPriority_t) osPriorityNormal, };
+/* Definitions for InputTask */
+osThreadId_t InputTaskHandle;
+const osThreadAttr_t InputTask_attributes = { .name = "InputTask", .stack_size =
+    128 * 4, .priority = (osPriority_t) osPriorityAboveNormal, };
+/* Definitions for RenderTask */
+osThreadId_t RenderTaskHandle;
+const osThreadAttr_t RenderTask_attributes = { .name = "RenderTask",
+    .stack_size = 512 * 4, .priority = (osPriority_t) osPriorityBelowNormal, };
+/* Definitions for ButtonSemaphore */
+osSemaphoreId_t ButtonSemaphoreHandle;
+const osSemaphoreAttr_t ButtonSemaphore_attributes =
+    { .name = "ButtonSemaphore" };
 /* USER CODE BEGIN PV */
 
 const int BIRD_W = 4, BIRD_H = 4;
-const float ACCEL = 0.3f, JUMP_VEL = -4.0f;
+const float ACCEL = 0.075f, JUMP_VEL = -2.0f;
 const int MAX_POS = 127 - BIRD_W;
 
 float vel = JUMP_VEL, pos = 64.0f;
@@ -66,6 +83,10 @@ void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_I2C1_Init(void);
 static void MX_SPI2_Init(void);
+void StartGameTask(void *argument);
+void StartInputTask(void *argument);
+void StartRenderTask(void *argument);
+
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -207,17 +228,58 @@ int main(void) {
 
   /* USER CODE END 2 */
 
+  /* Init scheduler */
+  osKernelInitialize();
+
+  /* USER CODE BEGIN RTOS_MUTEX */
+  /* add mutexes, ... */
+  /* USER CODE END RTOS_MUTEX */
+
+  /* Create the semaphores(s) */
+  /* creation of ButtonSemaphore */
+  ButtonSemaphoreHandle = osSemaphoreNew(1, 1, &ButtonSemaphore_attributes);
+
+  /* USER CODE BEGIN RTOS_SEMAPHORES */
+  /* add semaphores, ... */
+  /* USER CODE END RTOS_SEMAPHORES */
+
+  /* USER CODE BEGIN RTOS_TIMERS */
+  /* start timers, add new ones, ... */
+  /* USER CODE END RTOS_TIMERS */
+
+  /* USER CODE BEGIN RTOS_QUEUES */
+  /* add queues, ... */
+  /* USER CODE END RTOS_QUEUES */
+
+  /* Create the thread(s) */
+  /* creation of GameTask */
+  GameTaskHandle = osThreadNew(StartGameTask, NULL, &GameTask_attributes);
+
+  /* creation of InputTask */
+  InputTaskHandle = osThreadNew(StartInputTask, NULL, &InputTask_attributes);
+
+  /* creation of RenderTask */
+  RenderTaskHandle = osThreadNew(StartRenderTask, NULL, &RenderTask_attributes);
+
+  /* USER CODE BEGIN RTOS_THREADS */
+  /* add threads, ... */
+  /* USER CODE END RTOS_THREADS */
+
+  /* USER CODE BEGIN RTOS_EVENTS */
+  /* add events, ... */
+  /* USER CODE END RTOS_EVENTS */
+
+  /* Start scheduler */
+  osKernelStart();
+
+  /* We should never get here as control is now taken by the scheduler */
+
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1) {
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-
-    Update_Kinematics();
-    OLED_Update_Bird(pos);
-    HAL_Delay(33);
-
   }
   /* USER CODE END 3 */
 }
@@ -344,7 +406,7 @@ static void MX_GPIO_Init(void) {
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
   /* EXTI interrupt init*/
-  HAL_NVIC_SetPriority(EXTI15_10_IRQn, 0, 0);
+  HAL_NVIC_SetPriority(EXTI15_10_IRQn, 5, 0);
   HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
 
   /* USER CODE BEGIN MX_GPIO_Init_2 */
@@ -356,20 +418,101 @@ static void MX_GPIO_Init(void) {
 
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
   if (GPIO_Pin == BUTTON_PIN) {
-    static uint32_t lastInterruptTick = 0;
-    uint32_t currentTick = HAL_GetTick();
-    if (currentTick - lastInterruptTick > DEBOUNCE_DELAY) {
-      if (HAL_GPIO_ReadPin(GPIOB, BUTTON_PIN) == GPIO_PIN_RESET) {
-        vel = JUMP_VEL;
-        while (HAL_GPIO_ReadPin(GPIOB, BUTTON_PIN) == GPIO_PIN_RESET)
-          ;
-      }
-      lastInterruptTick = currentTick;
-    }
+    osSemaphoreRelease(ButtonSemaphoreHandle);
   }
 }
 
 /* USER CODE END 4 */
+
+/* USER CODE BEGIN Header_StartGameTask */
+/**
+ * @brief  Function implementing the GameTask thread.
+ * @param  argument: Not used
+ * @retval None
+ */
+/* USER CODE END Header_StartGameTask */
+void StartGameTask(void *argument) {
+  /* USER CODE BEGIN 5 */
+  TickType_t last_wake = xTaskGetTickCount();
+
+  /* Infinite loop */
+  for (;;) {
+    Update_Kinematics();
+    vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(10));
+  }
+  /* USER CODE END 5 */
+}
+
+/* USER CODE BEGIN Header_StartInputTask */
+/**
+ * @brief Function implementing the InputTask thread.
+ * @param argument: Not used
+ * @retval None
+ */
+/* USER CODE END Header_StartInputTask */
+void StartInputTask(void *argument) {
+  /* USER CODE BEGIN StartInputTask */
+  bool input_armed = true;
+
+  /* Infinite loop */
+  for (;;) {
+    if (osSemaphoreAcquire(ButtonSemaphoreHandle, osWaitForever) == osOK) {
+      if (input_armed
+          && HAL_GPIO_ReadPin(GPIOB, BUTTON_PIN) == GPIO_PIN_RESET) {
+        vel = JUMP_VEL;
+        input_armed = false;
+
+        while (HAL_GPIO_ReadPin(GPIOB, BUTTON_PIN) == GPIO_PIN_RESET) {
+          osDelay(1);
+        }
+
+        osDelay(DEBOUNCE_DELAY);
+
+        input_armed = true;
+      }
+    }
+  }
+  /* USER CODE END StartInputTask */
+}
+
+/* USER CODE BEGIN Header_StartRenderTask */
+/**
+ * @brief Function implementing the RenderTask thread.
+ * @param argument: Not used
+ * @retval None
+ */
+/* USER CODE END Header_StartRenderTask */
+void StartRenderTask(void *argument) {
+  /* USER CODE BEGIN StartRenderTask */
+  TickType_t last_wake = xTaskGetTickCount();
+
+  /* Infinite loop */
+  for (;;) {
+    OLED_Update_Bird(pos);
+    vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(20));
+  }
+  /* USER CODE END StartRenderTask */
+}
+
+/**
+ * @brief  Period elapsed callback in non blocking mode
+ * @note   This function is called  when TIM1 interrupt took place, inside
+ * HAL_TIM_IRQHandler(). It makes a direct call to HAL_IncTick() to increment
+ * a global variable "uwTick" used as application time base.
+ * @param  htim : TIM handle
+ * @retval None
+ */
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
+  /* USER CODE BEGIN Callback 0 */
+
+  /* USER CODE END Callback 0 */
+  if (htim->Instance == TIM1) {
+    HAL_IncTick();
+  }
+  /* USER CODE BEGIN Callback 1 */
+
+  /* USER CODE END Callback 1 */
+}
 
 /**
  * @brief  This function is executed in case of error occurrence.
