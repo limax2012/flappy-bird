@@ -63,6 +63,9 @@ const osThreadAttr_t InputTask_attributes = { .name = "InputTask", .stack_size =
 osThreadId_t RenderTaskHandle;
 const osThreadAttr_t RenderTask_attributes = { .name = "RenderTask",
     .stack_size = 512 * 4, .priority = (osPriority_t) osPriorityBelowNormal, };
+/* Definitions for PositionMutex */
+osMutexId_t PositionMutexHandle;
+const osMutexAttr_t PositionMutex_attributes = { .name = "PositionMutex" };
 /* Definitions for ButtonSemaphore */
 osSemaphoreId_t ButtonSemaphoreHandle;
 const osSemaphoreAttr_t ButtonSemaphore_attributes =
@@ -156,31 +159,38 @@ void OLED_Draw_Floor() {
 }
 
 void Update_Kinematics() {
-  pos += (vel += ACCEL);
-  if (pos > MAX_POS)
-    pos = MAX_POS;
+  if (osMutexAcquire(PositionMutexHandle, osWaitForever) == osOK) {
+    pos += (vel += ACCEL);
+    if (pos > MAX_POS)
+      pos = MAX_POS;
+    osMutexRelease(PositionMutexHandle);
+  }
 }
 
 void OLED_Update_Bird(float new_pos) {
   int new_top = (int) floorf(new_pos);
-  if (new_top == last_pos)
+  int old_top = last_pos;
+
+  // Exit if position has not changed
+  if (new_top == old_top)
     return;
 
-  int old_top = last_pos;
+  // Get range of involved pixels
   int min_y = (new_top < old_top) ? new_top : old_top;
   int max_y =
       ((new_top + BIRD_W) > (old_top + BIRD_W)) ?
           (new_top + BIRD_W) : (old_top + BIRD_W);
 
+  // Only modify changed pixels
   for (int y = min_y; y < max_y; y++) {
     bool was = (y >= old_top && y < old_top + BIRD_W);
     bool now = (y >= new_top && y < new_top + BIRD_W);
+
     if (was == now || y < 0 || y > 127)
       continue;
 
     uint8_t cmds[] = { 0x00, 0xB7, y & 0x0F, 0x10 + (y >> 4) };
     uint8_t data[] = { 0x40, now ? ((1 << BIRD_H) - 1) : 0x00 };
-
     HAL_I2C_Master_Transmit(&hi2c1, SSD1306_I2C_ADDR << 1, cmds, 4, 100);
     HAL_I2C_Master_Transmit(&hi2c1, SSD1306_I2C_ADDR << 1, data, 2, 100);
   }
@@ -230,6 +240,9 @@ int main(void) {
 
   /* Init scheduler */
   osKernelInitialize();
+  /* Create the mutex(es) */
+  /* creation of PositionMutex */
+  PositionMutexHandle = osMutexNew(&PositionMutex_attributes);
 
   /* USER CODE BEGIN RTOS_MUTEX */
   /* add mutexes, ... */
@@ -237,7 +250,7 @@ int main(void) {
 
   /* Create the semaphores(s) */
   /* creation of ButtonSemaphore */
-  ButtonSemaphoreHandle = osSemaphoreNew(1, 1, &ButtonSemaphore_attributes);
+  ButtonSemaphoreHandle = osSemaphoreNew(1, 0, &ButtonSemaphore_attributes);
 
   /* USER CODE BEGIN RTOS_SEMAPHORES */
   /* add semaphores, ... */
@@ -452,23 +465,18 @@ void StartGameTask(void *argument) {
 /* USER CODE END Header_StartInputTask */
 void StartInputTask(void *argument) {
   /* USER CODE BEGIN StartInputTask */
-  bool input_armed = true;
 
   /* Infinite loop */
   for (;;) {
     if (osSemaphoreAcquire(ButtonSemaphoreHandle, osWaitForever) == osOK) {
-      if (input_armed
-          && HAL_GPIO_ReadPin(GPIOB, BUTTON_PIN) == GPIO_PIN_RESET) {
+      if (HAL_GPIO_ReadPin(GPIOB, BUTTON_PIN) == GPIO_PIN_RESET) {
         vel = JUMP_VEL;
-        input_armed = false;
 
         while (HAL_GPIO_ReadPin(GPIOB, BUTTON_PIN) == GPIO_PIN_RESET) {
           osDelay(1);
         }
 
         osDelay(DEBOUNCE_DELAY);
-
-        input_armed = true;
       }
     }
   }
@@ -488,7 +496,10 @@ void StartRenderTask(void *argument) {
 
   /* Infinite loop */
   for (;;) {
-    OLED_Update_Bird(pos);
+    if (osMutexAcquire(PositionMutexHandle, osWaitForever) == osOK) {
+      OLED_Update_Bird(pos);
+      osMutexRelease(PositionMutexHandle);
+    }
     vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(20));
   }
   /* USER CODE END StartRenderTask */
