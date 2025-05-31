@@ -22,9 +22,10 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include "math.h"
-#include "stdbool.h"
-#include "string.h"
+#include <math.h>
+#include <stdbool.h>
+#include <string.h>
+#include "pipe_queue.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -72,11 +73,14 @@ const osSemaphoreAttr_t ButtonSemaphore_attributes =
     { .name = "ButtonSemaphore" };
 /* USER CODE BEGIN PV */
 
-const int BIRD_W = 4, BIRD_H = 4;
-const float ACCEL = 0.075f, JUMP_VEL = -2.0f;
+const int BIRD_W = 4;
+const int BIRD_H = 4;
 const int MAX_POS = 127 - BIRD_W;
+const float JUMP_VEL = -2.0f;
+const float ACCEL = 0.075f;
 
-float vel = JUMP_VEL, pos = 64.0f;
+float vel = JUMP_VEL;
+float pos = 64.0f;
 int last_pos = -1000;
 
 /* USER CODE END PV */
@@ -97,7 +101,7 @@ void StartRenderTask(void *argument);
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 
-void OLED_Init() {
+void oled_init() {
   uint8_t cmds[] = { 0x00,  // Control byte for commands
       0xAE,        // Display OFF
       0xD5, 0x80,  // Set display clock divide ratio/oscillator frequency
@@ -123,7 +127,7 @@ void OLED_Init() {
   HAL_Delay(100);
 }
 
-void OLED_Clear() {
+void oled_clear() {
   uint8_t horizontal_mode[] = { 0x00, 0x20, 0x00 };
   HAL_I2C_Master_Transmit(&hi2c1, SSD1306_I2C_ADDR << 1, horizontal_mode, 3,
       100);
@@ -140,7 +144,7 @@ void OLED_Clear() {
   }
 }
 
-void OLED_Draw_Floor() {
+void oled_draw_floor() {
   uint8_t vertical_mode[] = { 0x00, 0x20, 0x01 };
   HAL_I2C_Master_Transmit(&hi2c1, SSD1306_I2C_ADDR << 1, vertical_mode, 3, 100);
 
@@ -158,16 +162,7 @@ void OLED_Draw_Floor() {
       100);
 }
 
-void Update_Kinematics() {
-  if (osMutexAcquire(PositionMutexHandle, osWaitForever) == osOK) {
-    pos += (vel += ACCEL);
-    if (pos > MAX_POS)
-      pos = MAX_POS;
-    osMutexRelease(PositionMutexHandle);
-  }
-}
-
-void OLED_Update_Bird(float new_pos) {
+void oled_update_bird(float new_pos) {
   int new_top = (int) floorf(new_pos);
   int old_top = last_pos;
 
@@ -196,6 +191,15 @@ void OLED_Update_Bird(float new_pos) {
   }
 
   last_pos = new_top;
+}
+
+void update_bird_kinematics() {
+  if (osMutexAcquire(PositionMutexHandle, osWaitForever) == osOK) {
+    pos += (vel += ACCEL);
+    if (pos > MAX_POS)
+      pos = MAX_POS;
+    osMutexRelease(PositionMutexHandle);
+  }
 }
 
 /* USER CODE END 0 */
@@ -232,9 +236,9 @@ int main(void) {
   MX_SPI2_Init();
   /* USER CODE BEGIN 2 */
 
-  OLED_Init();
-  OLED_Clear();
-  OLED_Draw_Floor();
+  oled_init();
+  oled_clear();
+  oled_draw_floor();
 
   /* USER CODE END 2 */
 
@@ -450,7 +454,7 @@ void StartGameTask(void *argument) {
 
   /* Infinite loop */
   for (;;) {
-    Update_Kinematics();
+    update_bird_kinematics();
     vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(10));
   }
   /* USER CODE END 5 */
@@ -497,7 +501,7 @@ void StartRenderTask(void *argument) {
   /* Infinite loop */
   for (;;) {
     if (osMutexAcquire(PositionMutexHandle, osWaitForever) == osOK) {
-      OLED_Update_Bird(pos);
+      oled_update_bird(pos);
       osMutexRelease(PositionMutexHandle);
     }
     vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(20));
