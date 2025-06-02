@@ -37,7 +37,8 @@
 /* USER CODE BEGIN PD */
 
 #define SSD1306_I2C_ADDR 0x3C
-#define BUTTON_PIN GPIO_PIN_11
+#define RESTART_PIN GPIO_PIN_10
+#define JUMP_PIN GPIO_PIN_11
 #define DEBOUNCE_DELAY 50
 
 /* USER CODE END PD */
@@ -52,36 +53,47 @@ I2C_HandleTypeDef hi2c1;
 
 SPI_HandleTypeDef hspi2;
 
+/* Definitions for JumpButtonTask */
+osThreadId_t JumpButtonTaskHandle;
+const osThreadAttr_t JumpButtonTask_attributes = { .name = "JumpButtonTask",
+    .stack_size = 128 * 4, .priority = (osPriority_t) osPriorityHigh, };
 /* Definitions for GameTask */
 osThreadId_t GameTaskHandle;
 const osThreadAttr_t GameTask_attributes = { .name = "GameTask", .stack_size =
-    256 * 4, .priority = (osPriority_t) osPriorityNormal, };
-/* Definitions for InputTask */
-osThreadId_t InputTaskHandle;
-const osThreadAttr_t InputTask_attributes = { .name = "InputTask", .stack_size =
-    128 * 4, .priority = (osPriority_t) osPriorityAboveNormal, };
+    256 * 4, .priority = (osPriority_t) osPriorityAboveNormal, };
 /* Definitions for RenderTask */
 osThreadId_t RenderTaskHandle;
 const osThreadAttr_t RenderTask_attributes = { .name = "RenderTask",
-    .stack_size = 512 * 4, .priority = (osPriority_t) osPriorityBelowNormal, };
+    .stack_size = 512 * 4, .priority = (osPriority_t) osPriorityNormal, };
+/* Definitions for RestartButtonTa */
+osThreadId_t RestartButtonTaHandle;
+const osThreadAttr_t RestartButtonTa_attributes = { .name = "RestartButtonTa",
+    .stack_size = 128 * 4, .priority = (osPriority_t) osPriorityBelowNormal, };
 /* Definitions for PositionMutex */
 osMutexId_t PositionMutexHandle;
 const osMutexAttr_t PositionMutex_attributes = { .name = "PositionMutex" };
-/* Definitions for ButtonSemaphore */
-osSemaphoreId_t ButtonSemaphoreHandle;
-const osSemaphoreAttr_t ButtonSemaphore_attributes =
-    { .name = "ButtonSemaphore" };
+/* Definitions for PipeQueueMutex */
+osMutexId_t PipeQueueMutexHandle;
+const osMutexAttr_t PipeQueueMutex_attributes = { .name = "PipeQueueMutex" };
+/* Definitions for JumpSemaphore */
+osSemaphoreId_t JumpSemaphoreHandle;
+const osSemaphoreAttr_t JumpSemaphore_attributes = { .name = "JumpSemaphore" };
+/* Definitions for RestartSemaphore */
+osSemaphoreId_t RestartSemaphoreHandle;
+const osSemaphoreAttr_t RestartSemaphore_attributes = { .name =
+    "RestartSemaphore" };
 /* USER CODE BEGIN PV */
 
 const int BIRD_W = 4;
 const int BIRD_H = 4;
-const int MAX_POS = 127 - BIRD_W;
-const float JUMP_VEL = -2.0f;
-const float ACCEL = 0.075f;
+const int MAX_POS = 127 - BIRD_H;
+const float START_POS = 64.0f;
+const float JUMP_VEL = -1.3f;
+const float ACCEL = 0.04f;
 
+int last_pos = -100;
+float pos = START_POS;
 float vel = JUMP_VEL;
-float pos = 64.0f;
-int last_pos = -1000;
 
 /* USER CODE END PV */
 
@@ -90,9 +102,10 @@ void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_I2C1_Init(void);
 static void MX_SPI2_Init(void);
+void StartJumpButtonTask(void *argument);
 void StartGameTask(void *argument);
-void StartInputTask(void *argument);
 void StartRenderTask(void *argument);
+void StartRestartButtonTask(void *argument);
 
 /* USER CODE BEGIN PFP */
 
@@ -162,8 +175,8 @@ void oled_draw_floor() {
       100);
 }
 
-void oled_update_bird(float new_pos) {
-  int new_top = (int) floorf(new_pos);
+void oled_render_bird() {
+  int new_top = (int) floorf(pos);
   int old_top = last_pos;
 
   // Exit if position has not changed
@@ -173,19 +186,19 @@ void oled_update_bird(float new_pos) {
   // Get range of involved pixels
   int min_y = (new_top < old_top) ? new_top : old_top;
   int max_y =
-      ((new_top + BIRD_W) > (old_top + BIRD_W)) ?
-          (new_top + BIRD_W) : (old_top + BIRD_W);
+      ((new_top + BIRD_H) > (old_top + BIRD_H)) ?
+          (new_top + BIRD_H) : (old_top + BIRD_H);
 
   // Only modify changed pixels
   for (int y = min_y; y < max_y; y++) {
-    bool was = (y >= old_top && y < old_top + BIRD_W);
-    bool now = (y >= new_top && y < new_top + BIRD_W);
+    bool was = (y >= old_top && y < old_top + BIRD_H);
+    bool now = (y >= new_top && y < new_top + BIRD_H);
 
     if (was == now || y < 0 || y > 127)
       continue;
 
     uint8_t cmds[] = { 0x00, 0xB7, y & 0x0F, 0x10 + (y >> 4) };
-    uint8_t data[] = { 0x40, now ? ((1 << BIRD_H) - 1) : 0x00 };
+    uint8_t data[] = { 0x40, now ? ((1 << BIRD_W) - 1) : 0x00 };
     HAL_I2C_Master_Transmit(&hi2c1, SSD1306_I2C_ADDR << 1, cmds, 4, 100);
     HAL_I2C_Master_Transmit(&hi2c1, SSD1306_I2C_ADDR << 1, data, 2, 100);
   }
@@ -193,13 +206,54 @@ void oled_update_bird(float new_pos) {
   last_pos = new_top;
 }
 
-void update_bird_kinematics() {
-  if (osMutexAcquire(PositionMutexHandle, osWaitForever) == osOK) {
-    pos += (vel += ACCEL);
-    if (pos > MAX_POS)
-      pos = MAX_POS;
-    osMutexRelease(PositionMutexHandle);
+void oled_render_pipe(float last_rendered_x, float new_x, float gap_y) {
+  int new_right = (int) ceilf(new_x);
+  int old_right = (int) ceilf(last_rendered_x);
+
+  if (new_right == old_right)
+    return;
+
+  int min_page = (old_right / 8) >= 0 ? (old_right / 8) : 0;
+  int max_page =
+      (new_right + PIPE_WIDTH) / 8 <= 7 ? (new_right + PIPE_WIDTH) / 8 : 7;
+
+  uint8_t page_col[8] = { 0x00 };
+
+  for (int x = old_right; x < new_right + PIPE_WIDTH; x++) {
+    bool was = (x >= old_right && x < old_right + PIPE_WIDTH);
+    bool now = (x >= new_right && x < new_right + PIPE_WIDTH);
+
+    if (x < 0 || x > SCREEN_WIDTH - 1)
+      continue;
+
+    for (int page = min_page; page <= max_page; page++) {
+      if (x / 8 == page) {
+        if (was) {
+          page_col[page] &= ~(1 << (x % 8));
+        }
+        if (now) {
+          page_col[page] |= (1 << (x % 8));
+        }
+      }
+    }
   }
+
+  for (int page = min_page; page <= max_page; page++) {
+    uint8_t cmds[] = { 0x00, 0xB0 | page, 0x00, 0x10 };
+    HAL_I2C_Master_Transmit(&hi2c1, SSD1306_I2C_ADDR << 1, cmds, 4, 100);
+    for (int col = 0; col < 127; col++) {
+      uint8_t data[] = { 0x40,
+          (col >= gap_y) && (col < gap_y + PIPE_OPENING_SIZE) ?
+              0x00 : page_col[page] };
+      HAL_I2C_Master_Transmit(&hi2c1, SSD1306_I2C_ADDR << 1, data, 2, 100);
+    }
+  }
+}
+
+void bird_update() {
+  pos += (vel += ACCEL);
+  if (pos > MAX_POS)
+    pos = MAX_POS;
 }
 
 /* USER CODE END 0 */
@@ -240,6 +294,9 @@ int main(void) {
   oled_clear();
   oled_draw_floor();
 
+  pq_init();
+  pq_enqueue();
+
   /* USER CODE END 2 */
 
   /* Init scheduler */
@@ -248,13 +305,19 @@ int main(void) {
   /* creation of PositionMutex */
   PositionMutexHandle = osMutexNew(&PositionMutex_attributes);
 
+  /* creation of PipeQueueMutex */
+  PipeQueueMutexHandle = osMutexNew(&PipeQueueMutex_attributes);
+
   /* USER CODE BEGIN RTOS_MUTEX */
   /* add mutexes, ... */
   /* USER CODE END RTOS_MUTEX */
 
   /* Create the semaphores(s) */
-  /* creation of ButtonSemaphore */
-  ButtonSemaphoreHandle = osSemaphoreNew(1, 0, &ButtonSemaphore_attributes);
+  /* creation of JumpSemaphore */
+  JumpSemaphoreHandle = osSemaphoreNew(1, 0, &JumpSemaphore_attributes);
+
+  /* creation of RestartSemaphore */
+  RestartSemaphoreHandle = osSemaphoreNew(1, 0, &RestartSemaphore_attributes);
 
   /* USER CODE BEGIN RTOS_SEMAPHORES */
   /* add semaphores, ... */
@@ -269,14 +332,19 @@ int main(void) {
   /* USER CODE END RTOS_QUEUES */
 
   /* Create the thread(s) */
+  /* creation of JumpButtonTask */
+  JumpButtonTaskHandle = osThreadNew(StartJumpButtonTask, NULL,
+      &JumpButtonTask_attributes);
+
   /* creation of GameTask */
   GameTaskHandle = osThreadNew(StartGameTask, NULL, &GameTask_attributes);
 
-  /* creation of InputTask */
-  InputTaskHandle = osThreadNew(StartInputTask, NULL, &InputTask_attributes);
-
   /* creation of RenderTask */
   RenderTaskHandle = osThreadNew(StartRenderTask, NULL, &RenderTask_attributes);
+
+  /* creation of RestartButtonTa */
+  RestartButtonTaHandle = osThreadNew(StartRestartButtonTask, NULL,
+      &RestartButtonTa_attributes);
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
@@ -434,12 +502,41 @@ static void MX_GPIO_Init(void) {
 /* USER CODE BEGIN 4 */
 
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
-  if (GPIO_Pin == BUTTON_PIN) {
-    osSemaphoreRelease(ButtonSemaphoreHandle);
+  if (GPIO_Pin == JUMP_PIN) {
+    osSemaphoreRelease(JumpSemaphoreHandle);
+  } else if (GPIO_Pin == RESTART_PIN) {
+    osSemaphoreRelease(RestartSemaphoreHandle);
   }
 }
 
 /* USER CODE END 4 */
+
+/* USER CODE BEGIN Header_StartJumpButtonTask */
+/**
+ * @brief  Function implementing the JumpButtonTask thread.
+ * @param  argument: Not used
+ * @retval None
+ */
+/* USER CODE END Header_StartJumpButtonTask */
+void StartJumpButtonTask(void *argument) {
+  /* USER CODE BEGIN 5 */
+
+  /* Infinite loop */
+  for (;;) {
+    if (osSemaphoreAcquire(JumpSemaphoreHandle, osWaitForever) == osOK) {
+      if (HAL_GPIO_ReadPin(GPIOB, JUMP_PIN) == GPIO_PIN_RESET) {
+        vel = JUMP_VEL;
+
+        while (HAL_GPIO_ReadPin(GPIOB, JUMP_PIN) == GPIO_PIN_RESET) {
+          osDelay(1);
+        }
+
+        osDelay(DEBOUNCE_DELAY);
+      }
+    }
+  }
+  /* USER CODE END 5 */
+}
 
 /* USER CODE BEGIN Header_StartGameTask */
 /**
@@ -449,42 +546,24 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
  */
 /* USER CODE END Header_StartGameTask */
 void StartGameTask(void *argument) {
-  /* USER CODE BEGIN 5 */
+  /* USER CODE BEGIN StartGameTask */
   TickType_t last_wake = xTaskGetTickCount();
 
   /* Infinite loop */
   for (;;) {
-    update_bird_kinematics();
+    if (osMutexAcquire(PipeQueueMutexHandle, osWaitForever) == osOK) {
+      pq_update();
+      osMutexRelease(PipeQueueMutexHandle);
+    }
+
+    if (osMutexAcquire(PositionMutexHandle, osWaitForever) == osOK) {
+      bird_update();
+      osMutexRelease(PositionMutexHandle);
+    }
+
     vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(10));
   }
-  /* USER CODE END 5 */
-}
-
-/* USER CODE BEGIN Header_StartInputTask */
-/**
- * @brief Function implementing the InputTask thread.
- * @param argument: Not used
- * @retval None
- */
-/* USER CODE END Header_StartInputTask */
-void StartInputTask(void *argument) {
-  /* USER CODE BEGIN StartInputTask */
-
-  /* Infinite loop */
-  for (;;) {
-    if (osSemaphoreAcquire(ButtonSemaphoreHandle, osWaitForever) == osOK) {
-      if (HAL_GPIO_ReadPin(GPIOB, BUTTON_PIN) == GPIO_PIN_RESET) {
-        vel = JUMP_VEL;
-
-        while (HAL_GPIO_ReadPin(GPIOB, BUTTON_PIN) == GPIO_PIN_RESET) {
-          osDelay(1);
-        }
-
-        osDelay(DEBOUNCE_DELAY);
-      }
-    }
-  }
-  /* USER CODE END StartInputTask */
+  /* USER CODE END StartGameTask */
 }
 
 /* USER CODE BEGIN Header_StartRenderTask */
@@ -500,13 +579,48 @@ void StartRenderTask(void *argument) {
 
   /* Infinite loop */
   for (;;) {
+    if (osMutexAcquire(PipeQueueMutexHandle, osWaitForever) == osOK) {
+      oled_render_pq(oled_render_pipe);
+      osMutexRelease(PipeQueueMutexHandle);
+    }
+
     if (osMutexAcquire(PositionMutexHandle, osWaitForever) == osOK) {
-      oled_update_bird(pos);
+      oled_render_bird();
       osMutexRelease(PositionMutexHandle);
     }
+
     vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(20));
   }
   /* USER CODE END StartRenderTask */
+}
+
+/* USER CODE BEGIN Header_StartRestartButtonTask */
+/**
+ * @brief Function implementing the RestartButtonTa thread.
+ * @param argument: Not used
+ * @retval None
+ */
+/* USER CODE END Header_StartRestartButtonTask */
+void StartRestartButtonTask(void *argument) {
+  /* USER CODE BEGIN StartRestartButtonTask */
+
+  /* Infinite loop */
+  for (;;) {
+    if (osSemaphoreAcquire(RestartSemaphoreHandle, osWaitForever) == osOK) {
+      if (HAL_GPIO_ReadPin(GPIOB, RESTART_PIN) == GPIO_PIN_RESET) {
+        pq_clear();
+        pos = START_POS;
+        vel = JUMP_VEL;
+
+        while (HAL_GPIO_ReadPin(GPIOB, RESTART_PIN) == GPIO_PIN_RESET) {
+          osDelay(1);
+        }
+
+        osDelay(DEBOUNCE_DELAY);
+      }
+    }
+  }
+  /* USER CODE END StartRestartButtonTask */
 }
 
 /**

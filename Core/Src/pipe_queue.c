@@ -6,14 +6,11 @@
  */
 
 #include <stdlib.h>
+#include <time.h>
 #include "pipe_queue.h"
 
-#define SCREEN_WIDTH 128
-
-static const int PIPE_WIDTH = 6;
-static const float PIPE_SPEED = 0.1f;
-
 typedef struct Pipe {
+  int last_rendered_x;
   float x;
   float gap_y;
   struct Pipe *next;
@@ -27,16 +24,22 @@ typedef struct {
 static PipeQueue pq;
 
 void pq_init(void) {
+  srand((unsigned int) time(NULL));
+
   pq.front = NULL;
   pq.rear = NULL;
 }
 
-void pq_enqueue(float gap_y) {
+void pq_enqueue() {
   Pipe *new_pipe = malloc(sizeof(Pipe));
   if (!new_pipe)
     return;
 
-  new_pipe->x = SCREEN_WIDTH;
+  float gap_y = ((float) rand() / RAND_MAX)
+      * (PIPE_LOWEST_Y - PIPE_HIGHEST_Y)+ PIPE_HIGHEST_Y;
+
+  new_pipe->last_rendered_x = -100;
+  new_pipe->x = (float) -PIPE_WIDTH;
   new_pipe->gap_y = gap_y;
   new_pipe->next = NULL;
 
@@ -66,26 +69,32 @@ void pq_update(void) {
   Pipe *current_pipe = pq.front;
 
   while (current_pipe) {
-    current_pipe->x -= PIPE_SPEED;
+    current_pipe->x += PIPE_SPEED;
     current_pipe = current_pipe->next;
   }
 
-  while (pq.front && (pq.front->x + PIPE_WIDTH < 0)) {
+  if (pq.rear && pq.rear->x > PIPE_WIDTH + PIPE_SEPARATION) {
+    pq_enqueue();
+  }
+
+  while (pq.front
+      && (pq.front->x > SCREEN_WIDTH + PIPE_PERSIST_OFFSCREEN_PIXELS)) {
     pq_dequeue();
-  }
-}
-
-void pq_render_all(PipeRenderFunc render) {
-  Pipe *current_pipe = pq.front;
-
-  while (current_pipe) {
-    render(current_pipe->x, current_pipe->gap_y);
-    current_pipe = current_pipe->next;
   }
 }
 
 void pq_clear(void) {
   while (pq.front) {
     pq_dequeue();
+  }
+}
+
+void oled_render_pq(PipeRenderFunc render) {
+  Pipe *current_pipe = pq.front;
+
+  while (current_pipe) {
+    render(current_pipe->last_rendered_x, current_pipe->x, current_pipe->gap_y);
+    current_pipe->last_rendered_x = current_pipe->x;
+    current_pipe = current_pipe->next;
   }
 }
