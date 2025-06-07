@@ -1,5 +1,5 @@
 /*
- * pipe.c
+ * pipe_queue.c
  *
  *  Created on: May 30, 2025
  *      Author: Max
@@ -7,12 +7,12 @@
 
 #include <stdlib.h>
 #include <time.h>
+#include "oled.h"
 #include "pipe_queue.h"
 
 typedef struct Pipe {
-  int last_rendered_x;
   float x;
-  float gap_y;
+  float gap_top_y;
   struct Pipe *next;
 } Pipe;
 
@@ -32,15 +32,15 @@ void pq_init(void) {
 
 void pq_enqueue() {
   Pipe *new_pipe = malloc(sizeof(Pipe));
-  if (!new_pipe)
+  if (!new_pipe) {
     return;
+  }
 
-  float gap_y = ((float) rand() / RAND_MAX)
-      * (PIPE_LOWEST_Y - PIPE_HIGHEST_Y)+ PIPE_HIGHEST_Y;
+  float gap_top_y = PIPE_MIN_Y
+      + (float) rand() / RAND_MAX * (PIPE_MAX_Y - PIPE_MIN_Y);
 
-  new_pipe->last_rendered_x = -100;
-  new_pipe->x = (float) -PIPE_WIDTH;
-  new_pipe->gap_y = gap_y;
+  new_pipe->x = (float) OLED_WIDTH;
+  new_pipe->gap_top_y = gap_top_y;
   new_pipe->next = NULL;
 
   if (pq.rear) {
@@ -69,16 +69,15 @@ void pq_update(void) {
   Pipe *current_pipe = pq.front;
 
   while (current_pipe) {
-    current_pipe->x += PIPE_SPEED;
+    current_pipe->x -= PIPE_SPEED;
     current_pipe = current_pipe->next;
   }
 
-  if (pq.rear && pq.rear->x > PIPE_WIDTH + PIPE_SEPARATION) {
+  if (pq.rear && (OLED_WIDTH - pq.rear->x > PIPE_WIDTH + PIPE_SEPARATION)) {
     pq_enqueue();
   }
 
-  while (pq.front
-      && (pq.front->x > SCREEN_WIDTH + PIPE_PERSIST_OFFSCREEN_PIXELS)) {
+  while (pq.front && (pq.front->x < -PIPE_WIDTH)) {
     pq_dequeue();
   }
 }
@@ -89,12 +88,17 @@ void pq_clear(void) {
   }
 }
 
-void oled_render_pq(PipeRenderFunc render) {
+void pq_draw() {
   Pipe *current_pipe = pq.front;
 
   while (current_pipe) {
-    render(current_pipe->last_rendered_x, current_pipe->x, current_pipe->gap_y);
-    current_pipe->last_rendered_x = current_pipe->x;
+    int x = (int) current_pipe->x;
+    int gap_top_y = (int) current_pipe->gap_top_y;
+    int gap_bottom_y = gap_top_y + PIPE_GAP_SIZE;
+
+    fb_fill_rectangle(x, 0, PIPE_WIDTH, gap_top_y);
+    fb_fill_rectangle(x, gap_bottom_y, PIPE_WIDTH, OLED_HEIGHT - gap_bottom_y);
+
     current_pipe = current_pipe->next;
   }
 }

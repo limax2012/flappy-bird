@@ -22,10 +22,14 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+
 #include <math.h>
 #include <stdbool.h>
 #include <string.h>
+#include "bird.h"
+#include "oled.h"
 #include "pipe_queue.h"
+
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -36,9 +40,7 @@
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 
-#define SSD1306_I2C_ADDR 0x3C
-#define RESTART_PIN GPIO_PIN_10
-#define JUMP_PIN GPIO_PIN_11
+#define JUMP_BUTTON_PIN GPIO_PIN_11
 #define DEBOUNCE_DELAY 50
 
 /* USER CODE END PD */
@@ -65,35 +67,16 @@ const osThreadAttr_t GameTask_attributes = { .name = "GameTask", .stack_size =
 osThreadId_t RenderTaskHandle;
 const osThreadAttr_t RenderTask_attributes = { .name = "RenderTask",
     .stack_size = 512 * 4, .priority = (osPriority_t) osPriorityNormal, };
-/* Definitions for RestartButtonTa */
-osThreadId_t RestartButtonTaHandle;
-const osThreadAttr_t RestartButtonTa_attributes = { .name = "RestartButtonTa",
-    .stack_size = 128 * 4, .priority = (osPriority_t) osPriorityBelowNormal, };
-/* Definitions for PositionMutex */
-osMutexId_t PositionMutexHandle;
-const osMutexAttr_t PositionMutex_attributes = { .name = "PositionMutex" };
+/* Definitions for BirdPosMutex */
+osMutexId_t BirdPosMutexHandle;
+const osMutexAttr_t BirdPosMutex_attributes = { .name = "BirdPosMutex" };
 /* Definitions for PipeQueueMutex */
 osMutexId_t PipeQueueMutexHandle;
 const osMutexAttr_t PipeQueueMutex_attributes = { .name = "PipeQueueMutex" };
 /* Definitions for JumpSemaphore */
 osSemaphoreId_t JumpSemaphoreHandle;
 const osSemaphoreAttr_t JumpSemaphore_attributes = { .name = "JumpSemaphore" };
-/* Definitions for RestartSemaphore */
-osSemaphoreId_t RestartSemaphoreHandle;
-const osSemaphoreAttr_t RestartSemaphore_attributes = { .name =
-    "RestartSemaphore" };
 /* USER CODE BEGIN PV */
-
-const int BIRD_W = 4;
-const int BIRD_H = 4;
-const int MAX_POS = 127 - BIRD_H;
-const float START_POS = 64.0f;
-const float JUMP_VEL = -1.3f;
-const float ACCEL = 0.04f;
-
-int last_pos = -100;
-float pos = START_POS;
-float vel = JUMP_VEL;
 
 /* USER CODE END PV */
 
@@ -105,7 +88,6 @@ static void MX_SPI2_Init(void);
 void StartJumpButtonTask(void *argument);
 void StartGameTask(void *argument);
 void StartRenderTask(void *argument);
-void StartRestartButtonTask(void *argument);
 
 /* USER CODE BEGIN PFP */
 
@@ -113,148 +95,6 @@ void StartRestartButtonTask(void *argument);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-
-void oled_init() {
-  uint8_t cmds[] = { 0x00,  // Control byte for commands
-      0xAE,        // Display OFF
-      0xD5, 0x80,  // Set display clock divide ratio/oscillator frequency
-      0xA8, 0x3F,  // Set multiplex ratio (height - 1)
-      0xD3, 0x00,  // Set display offset
-      0x40,        // Set start line to 0
-      0x8D, 0x14,  // Enable charge pump
-      0x20, 0x00,  // Set memory addressing mode to horizontal
-      0xA1,        // Set segment re-map (mirror horizontally)
-      0xC8,        // Set COM output scan direction (remapped mode)
-      0xDA, 0x12,  // Set COM pins hardware configuration
-      0x81, 0x7F,  // Set contrast control
-      0xD9, 0xF1,  // Set pre-charge period
-      0xDB, 0x40,  // Set VCOMH deselect level
-      0xA4,        // Resume display from RAM content
-      0xA6,        // Set normal display (not inverted)
-      0xAF         // Display ON
-      };
-
-  HAL_I2C_Master_Transmit(&hi2c1, SSD1306_I2C_ADDR << 1, cmds, sizeof(cmds),
-      100);
-
-  HAL_Delay(100);
-}
-
-void oled_clear() {
-  uint8_t horizontal_mode[] = { 0x00, 0x20, 0x00 };
-  HAL_I2C_Master_Transmit(&hi2c1, SSD1306_I2C_ADDR << 1, horizontal_mode, 3,
-      100);
-
-  for (uint8_t page = 0; page < 8; page++) {
-    uint8_t set_page_col[] = { 0x00, 0xB0 | page, 0x00, 0x10 };
-    HAL_I2C_Master_Transmit(&hi2c1, SSD1306_I2C_ADDR << 1, set_page_col, 4,
-        100);
-
-    uint8_t clear[129] = { 0x40 };
-    memset(clear + 1, 0x00, 128);
-    HAL_I2C_Master_Transmit(&hi2c1, SSD1306_I2C_ADDR << 1, clear, sizeof(clear),
-        100);
-  }
-}
-
-void oled_draw_floor() {
-  uint8_t vertical_mode[] = { 0x00, 0x20, 0x01 };
-  HAL_I2C_Master_Transmit(&hi2c1, SSD1306_I2C_ADDR << 1, vertical_mode, 3, 100);
-
-  uint8_t set_column[] = { 0x00, 0x21, 127, 127 };
-  HAL_I2C_Master_Transmit(&hi2c1, SSD1306_I2C_ADDR << 1, set_column, 4, 100);
-
-  uint8_t set_page[] = { 0x00, 0x22, 0x00, 0x07 };
-  HAL_I2C_Master_Transmit(&hi2c1, SSD1306_I2C_ADDR << 1, set_page, 4, 100);
-
-  uint8_t data[] = { 0x40, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
-  HAL_I2C_Master_Transmit(&hi2c1, SSD1306_I2C_ADDR << 1, data, 9, 100);
-
-  uint8_t horizontal_mode[] = { 0x00, 0x20, 0x00 };
-  HAL_I2C_Master_Transmit(&hi2c1, SSD1306_I2C_ADDR << 1, horizontal_mode, 3,
-      100);
-}
-
-void oled_render_bird() {
-  int new_top = (int) floorf(pos);
-  int old_top = last_pos;
-
-  // Exit if position has not changed
-  if (new_top == old_top)
-    return;
-
-  // Get range of involved pixels
-  int min_y = (new_top < old_top) ? new_top : old_top;
-  int max_y =
-      ((new_top + BIRD_H) > (old_top + BIRD_H)) ?
-          (new_top + BIRD_H) : (old_top + BIRD_H);
-
-  // Only modify changed pixels
-  for (int y = min_y; y < max_y; y++) {
-    bool was = (y >= old_top && y < old_top + BIRD_H);
-    bool now = (y >= new_top && y < new_top + BIRD_H);
-
-    if (was == now || y < 0 || y > 127)
-      continue;
-
-    uint8_t cmds[] = { 0x00, 0xB7, y & 0x0F, 0x10 + (y >> 4) };
-    uint8_t data[] = { 0x40, now ? ((1 << BIRD_W) - 1) : 0x00 };
-    HAL_I2C_Master_Transmit(&hi2c1, SSD1306_I2C_ADDR << 1, cmds, 4, 100);
-    HAL_I2C_Master_Transmit(&hi2c1, SSD1306_I2C_ADDR << 1, data, 2, 100);
-  }
-
-  last_pos = new_top;
-}
-
-void oled_render_pipe(float last_rendered_x, float new_x, float gap_y) {
-  int new_right = (int) ceilf(new_x);
-  int old_right = (int) ceilf(last_rendered_x);
-
-  if (new_right == old_right)
-    return;
-
-  int min_page = (old_right / 8) >= 0 ? (old_right / 8) : 0;
-  int max_page =
-      (new_right + PIPE_WIDTH) / 8 <= 7 ? (new_right + PIPE_WIDTH) / 8 : 7;
-
-  uint8_t page_col[8] = { 0x00 };
-
-  for (int x = old_right; x < new_right + PIPE_WIDTH; x++) {
-    bool was = (x >= old_right && x < old_right + PIPE_WIDTH);
-    bool now = (x >= new_right && x < new_right + PIPE_WIDTH);
-
-    if (x < 0 || x > SCREEN_WIDTH - 1)
-      continue;
-
-    for (int page = min_page; page <= max_page; page++) {
-      if (x / 8 == page) {
-        if (was) {
-          page_col[page] &= ~(1 << (x % 8));
-        }
-        if (now) {
-          page_col[page] |= (1 << (x % 8));
-        }
-      }
-    }
-  }
-
-  for (int page = min_page; page <= max_page; page++) {
-    uint8_t cmds[] = { 0x00, 0xB0 | page, 0x00, 0x10 };
-    HAL_I2C_Master_Transmit(&hi2c1, SSD1306_I2C_ADDR << 1, cmds, 4, 100);
-    for (int col = 0; col < 127; col++) {
-      uint8_t data[] = { 0x40,
-          (col >= gap_y) && (col < gap_y + PIPE_OPENING_SIZE) ?
-              0x00 : page_col[page] };
-      HAL_I2C_Master_Transmit(&hi2c1, SSD1306_I2C_ADDR << 1, data, 2, 100);
-    }
-  }
-}
-
-void bird_update() {
-  pos += (vel += ACCEL);
-  if (pos > MAX_POS)
-    pos = MAX_POS;
-}
 
 /* USER CODE END 0 */
 
@@ -290,10 +130,8 @@ int main(void) {
   MX_SPI2_Init();
   /* USER CODE BEGIN 2 */
 
-  oled_init();
-  oled_clear();
-  oled_draw_floor();
-
+  oled_init(&hi2c1);
+  oled_flush_fb(&hi2c1);
   pq_init();
   pq_enqueue();
 
@@ -302,8 +140,8 @@ int main(void) {
   /* Init scheduler */
   osKernelInitialize();
   /* Create the mutex(es) */
-  /* creation of PositionMutex */
-  PositionMutexHandle = osMutexNew(&PositionMutex_attributes);
+  /* creation of BirdPosMutex */
+  BirdPosMutexHandle = osMutexNew(&BirdPosMutex_attributes);
 
   /* creation of PipeQueueMutex */
   PipeQueueMutexHandle = osMutexNew(&PipeQueueMutex_attributes);
@@ -315,9 +153,6 @@ int main(void) {
   /* Create the semaphores(s) */
   /* creation of JumpSemaphore */
   JumpSemaphoreHandle = osSemaphoreNew(1, 0, &JumpSemaphore_attributes);
-
-  /* creation of RestartSemaphore */
-  RestartSemaphoreHandle = osSemaphoreNew(1, 0, &RestartSemaphore_attributes);
 
   /* USER CODE BEGIN RTOS_SEMAPHORES */
   /* add semaphores, ... */
@@ -341,10 +176,6 @@ int main(void) {
 
   /* creation of RenderTask */
   RenderTaskHandle = osThreadNew(StartRenderTask, NULL, &RenderTask_attributes);
-
-  /* creation of RestartButtonTa */
-  RestartButtonTaHandle = osThreadNew(StartRestartButtonTask, NULL,
-      &RestartButtonTa_attributes);
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
@@ -502,10 +333,8 @@ static void MX_GPIO_Init(void) {
 /* USER CODE BEGIN 4 */
 
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
-  if (GPIO_Pin == JUMP_PIN) {
+  if (GPIO_Pin == JUMP_BUTTON_PIN) {
     osSemaphoreRelease(JumpSemaphoreHandle);
-  } else if (GPIO_Pin == RESTART_PIN) {
-    osSemaphoreRelease(RestartSemaphoreHandle);
   }
 }
 
@@ -524,10 +353,10 @@ void StartJumpButtonTask(void *argument) {
   /* Infinite loop */
   for (;;) {
     if (osSemaphoreAcquire(JumpSemaphoreHandle, osWaitForever) == osOK) {
-      if (HAL_GPIO_ReadPin(GPIOB, JUMP_PIN) == GPIO_PIN_RESET) {
-        vel = JUMP_VEL;
+      if (HAL_GPIO_ReadPin(GPIOB, JUMP_BUTTON_PIN) == GPIO_PIN_RESET) {
+        bird_reset_vel();
 
-        while (HAL_GPIO_ReadPin(GPIOB, JUMP_PIN) == GPIO_PIN_RESET) {
+        while (HAL_GPIO_ReadPin(GPIOB, JUMP_BUTTON_PIN) == GPIO_PIN_RESET) {
           osDelay(1);
         }
 
@@ -551,14 +380,14 @@ void StartGameTask(void *argument) {
 
   /* Infinite loop */
   for (;;) {
+    if (osMutexAcquire(BirdPosMutexHandle, osWaitForever) == osOK) {
+      bird_update_pos();
+      osMutexRelease(BirdPosMutexHandle);
+    }
+
     if (osMutexAcquire(PipeQueueMutexHandle, osWaitForever) == osOK) {
       pq_update();
       osMutexRelease(PipeQueueMutexHandle);
-    }
-
-    if (osMutexAcquire(PositionMutexHandle, osWaitForever) == osOK) {
-      bird_update();
-      osMutexRelease(PositionMutexHandle);
     }
 
     vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(10));
@@ -579,48 +408,24 @@ void StartRenderTask(void *argument) {
 
   /* Infinite loop */
   for (;;) {
+    fb_clear();
+    fb_draw_floor();
+
+    if (osMutexAcquire(BirdPosMutexHandle, osWaitForever) == osOK) {
+      bird_draw();
+      osMutexRelease(BirdPosMutexHandle);
+    }
+
     if (osMutexAcquire(PipeQueueMutexHandle, osWaitForever) == osOK) {
-      oled_render_pq(oled_render_pipe);
+      pq_draw();
       osMutexRelease(PipeQueueMutexHandle);
     }
 
-    if (osMutexAcquire(PositionMutexHandle, osWaitForever) == osOK) {
-      oled_render_bird();
-      osMutexRelease(PositionMutexHandle);
-    }
+    oled_flush_fb(&hi2c1);
 
-    vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(20));
+    vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(40));
   }
   /* USER CODE END StartRenderTask */
-}
-
-/* USER CODE BEGIN Header_StartRestartButtonTask */
-/**
- * @brief Function implementing the RestartButtonTa thread.
- * @param argument: Not used
- * @retval None
- */
-/* USER CODE END Header_StartRestartButtonTask */
-void StartRestartButtonTask(void *argument) {
-  /* USER CODE BEGIN StartRestartButtonTask */
-
-  /* Infinite loop */
-  for (;;) {
-    if (osSemaphoreAcquire(RestartSemaphoreHandle, osWaitForever) == osOK) {
-      if (HAL_GPIO_ReadPin(GPIOB, RESTART_PIN) == GPIO_PIN_RESET) {
-        pq_clear();
-        pos = START_POS;
-        vel = JUMP_VEL;
-
-        while (HAL_GPIO_ReadPin(GPIOB, RESTART_PIN) == GPIO_PIN_RESET) {
-          osDelay(1);
-        }
-
-        osDelay(DEBOUNCE_DELAY);
-      }
-    }
-  }
-  /* USER CODE END StartRestartButtonTask */
 }
 
 /**
