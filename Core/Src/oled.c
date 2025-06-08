@@ -58,6 +58,8 @@ void fb_draw_floor(void) {
 }
 
 void oled_flush_fb(I2C_HandleTypeDef *hi2c) {
+  // uint32_t start = HAL_GetTick();
+
   uint8_t flush_data[1 + (OLED_WIDTH / 8) * OLED_HEIGHT] = { 0 };
   flush_data[0] = 0x40;
   for (int fb_y = 0; fb_y < OLED_HEIGHT; fb_y++) {
@@ -67,6 +69,12 @@ void oled_flush_fb(I2C_HandleTypeDef *hi2c) {
       flush_data[oled_byte_index] |= fb[fb_y][fb_x] << (mirrored_fb_x % 8);
     }
   }
+
+  // uint32_t before_i2c = HAL_GetTick() - start;
+
   HAL_I2C_Master_Transmit(hi2c, SSD1306_I2C_ADDR << 1, flush_data,
       sizeof(flush_data), 100);
+
+  // uint32_t after_i2c = HAL_GetTick() - start;
+  // uint32_t i2c_time = after_i2c - before_i2c;
 }
