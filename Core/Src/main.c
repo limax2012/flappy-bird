@@ -80,6 +80,9 @@ osSemaphoreId_t JumpSemaphoreHandle;
 const osSemaphoreAttr_t JumpSemaphore_attributes = { .name = "JumpSemaphore" };
 /* USER CODE BEGIN PV */
 
+bool game_paused = false;
+int pause_time = 0;
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -369,7 +372,12 @@ void StartJumpButtonTask(void *argument) {
       if (HAL_GPIO_ReadPin(JUMP_BUTTON_PORT, JUMP_BUTTON_PIN)
           == GPIO_PIN_RESET) {
 
-        bird_reset_vel();
+        if (!game_paused) {
+          bird_reset_vel();
+        } else if ((HAL_GetTick() - pause_time) > 400) {
+          reset_game();
+          game_paused = false;
+        }
 
         while (HAL_GPIO_ReadPin(JUMP_BUTTON_PORT, JUMP_BUTTON_PIN)
             == GPIO_PIN_RESET) {
@@ -397,7 +405,8 @@ void StartGameTask(void *argument) {
 
   /* Infinite loop */
   for (;;) {
-    if ((osMutexAcquire(BirdPosMutexHandle, osWaitForever) == osOK)
+    if (!game_paused
+        && (osMutexAcquire(BirdPosMutexHandle, osWaitForever) == osOK)
         && (osMutexAcquire(PipeQueueMutexHandle, osWaitForever) == osOK)) {
 
       bird_update();
@@ -406,7 +415,8 @@ void StartGameTask(void *argument) {
       if (pq_collision(BIRD_POS_X, bird_get_y(), BIRD_W, BIRD_H)
           || (bird_get_y() + BIRD_H > OLED_HEIGHT - 1)) {
 
-        reset_game();
+        game_paused = true;
+        pause_time = HAL_GetTick();
       }
 
       osMutexRelease(PipeQueueMutexHandle);
