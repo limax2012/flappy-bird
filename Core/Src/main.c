@@ -26,6 +26,7 @@
 #include <math.h>
 #include <stdbool.h>
 #include <string.h>
+
 #include "bird.h"
 #include "oled.h"
 #include "pipe_queue.h"
@@ -96,6 +97,13 @@ void StartRenderTask(void *argument);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+
+void reset_game(void) {
+  bird_reset_pos();
+  bird_reset_vel();
+  pq_clear();
+  pq_enqueue();
+}
 
 /* USER CODE END 0 */
 
@@ -358,11 +366,14 @@ void StartJumpButtonTask(void *argument) {
   /* Infinite loop */
   for (;;) {
     if (osSemaphoreAcquire(JumpSemaphoreHandle, osWaitForever) == osOK) {
-      if (HAL_GPIO_ReadPin(JUMP_BUTTON_PORT, JUMP_BUTTON_PIN) == GPIO_PIN_RESET) {
+      if (HAL_GPIO_ReadPin(JUMP_BUTTON_PORT, JUMP_BUTTON_PIN)
+          == GPIO_PIN_RESET) {
+
         bird_reset_vel();
 
         while (HAL_GPIO_ReadPin(JUMP_BUTTON_PORT, JUMP_BUTTON_PIN)
             == GPIO_PIN_RESET) {
+
           osDelay(1);
         }
 
@@ -386,14 +397,20 @@ void StartGameTask(void *argument) {
 
   /* Infinite loop */
   for (;;) {
-    if (osMutexAcquire(BirdPosMutexHandle, osWaitForever) == osOK) {
-      bird_update_pos();
-      osMutexRelease(BirdPosMutexHandle);
-    }
+    if ((osMutexAcquire(BirdPosMutexHandle, osWaitForever) == osOK)
+        && (osMutexAcquire(PipeQueueMutexHandle, osWaitForever) == osOK)) {
 
-    if (osMutexAcquire(PipeQueueMutexHandle, osWaitForever) == osOK) {
+      bird_update();
       pq_update();
+
+      if (pq_collision(BIRD_POS_X, bird_get_y(), BIRD_W, BIRD_H)
+          || (bird_get_y() + BIRD_H > OLED_HEIGHT - 1)) {
+
+        reset_game();
+      }
+
       osMutexRelease(PipeQueueMutexHandle);
+      osMutexRelease(BirdPosMutexHandle);
     }
 
     vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(10));

@@ -6,6 +6,7 @@
  */
 
 #include <string.h>
+
 #include "oled.h"
 
 static uint8_t fb[OLED_HEIGHT][OLED_WIDTH];

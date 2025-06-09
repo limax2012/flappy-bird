@@ -8,6 +8,8 @@
 #ifndef SRC_PIPE_QUEUE_H_
 #define SRC_PIPE_QUEUE_H_
 
+#include <stdbool.h>
+
 #define PIPE_WIDTH 6
 #define PIPE_SEPARATION 16
 #define PIPE_GAP_SIZE 42
@@ -20,5 +22,6 @@ void pq_enqueue();
 void pq_update(void);
 void pq_clear(void);
 void pq_draw(void);
+bool pq_collision(float bird_x, float bird_y, int bird_w, int bird_h);
 
 #endif /* SRC_PIPE_QUEUE_H_ */

@@ -15,7 +15,9 @@
 #define BIRD_JUMP_VEL_Y -1.3f
 #define BIRD_ACCEL_Y 0.04f
 
-void bird_update_pos(void);
+float bird_get_y(void);
+void bird_update(void);
+void bird_reset_pos(void);
 void bird_reset_vel(void);
 void bird_draw(void);
 

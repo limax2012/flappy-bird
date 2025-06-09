@@ -5,8 +5,10 @@
  *      Author: Max
  */
 
+#include <stdbool.h>
 #include <stdlib.h>
 #include <time.h>
+
 #include "oled.h"
 #include "pipe_queue.h"
 
@@ -101,4 +103,23 @@ void pq_draw() {
 
     current_pipe = current_pipe->next;
   }
+}
+
+bool pq_collision(float bird_x, float bird_y, int bird_w, int bird_h) {
+  Pipe *current_pipe = pq.front;
+
+  while (current_pipe) {
+    float pipe_x = current_pipe->x;
+    if ((bird_x + bird_w > pipe_x) && (bird_x < pipe_x + PIPE_WIDTH)) {
+      float pipe_top = current_pipe->gap_top_y;
+      if ((bird_y < pipe_top) || (bird_y + bird_h > pipe_top + PIPE_GAP_SIZE)) {
+        return true;
+      }
+      break;
+    }
+
+    current_pipe = current_pipe->next;
+  }
+
+  return false;
 }
