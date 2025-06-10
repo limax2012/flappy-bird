@@ -374,7 +374,7 @@ void StartJumpButtonTask(void *argument) {
 
         if (!game_paused) {
           bird_reset_vel();
-        } else if ((HAL_GetTick() - pause_time) > 400) {
+        } else if ((HAL_GetTick() - pause_time) > 300) {
           reset_game();
           game_paused = false;
         }
@@ -441,6 +441,8 @@ void StartRenderTask(void *argument) {
 
   /* Infinite loop */
   for (;;) {
+    // uint32_t render_start = HAL_GetTick();
+
     fb_clear();
     fb_draw_floor();
 
@@ -456,7 +458,9 @@ void StartRenderTask(void *argument) {
 
     oled_flush_fb(&hi2c2);
 
-    vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(35));
+    // uint32_t render_time = HAL_GetTick() - render_start;
+
+    vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(37));
   }
   /* USER CODE END StartRenderTask */
 }

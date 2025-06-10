@@ -12,7 +12,7 @@
 
 #define PIPE_WIDTH 6
 #define PIPE_SEPARATION 16
-#define PIPE_GAP_SIZE 42
+#define PIPE_GAP_SIZE 40
 #define PIPE_SPEED 0.15f
 #define PIPE_MIN_Y 28
 #define PIPE_MAX_Y 68

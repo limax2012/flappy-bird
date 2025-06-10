@@ -12,7 +12,8 @@
 #define BIRD_H 4
 #define BIRD_POS_X 12
 #define BIRD_START_POS_Y 64.0f
-#define BIRD_JUMP_VEL_Y -1.3f
+#define BIRD_JUMP_VEL_Y -1.35f
+#define BIRD_MAX_VEL_Y 1.6f
 #define BIRD_ACCEL_Y 0.04f
 
 float bird_get_y(void);
