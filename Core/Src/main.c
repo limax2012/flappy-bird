@@ -425,8 +425,8 @@ void StartGameTask(void *argument) {
         score++;
       }
 
-      osMutexRelease(BirdPosMutexHandle);
       osMutexRelease(PipeQueueMutexHandle);
+      osMutexRelease(BirdPosMutexHandle);
     }
 
     vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(10));
@@ -451,14 +451,14 @@ void StartRenderTask(void *argument) {
 
     fb_clear();
 
-    if (osMutexAcquire(BirdPosMutexHandle, osWaitForever) == osOK) {
-      bird_draw();
-      osMutexRelease(BirdPosMutexHandle);
-    }
+    if ((osMutexAcquire(BirdPosMutexHandle, osWaitForever) == osOK)
+        && (osMutexAcquire(PipeQueueMutexHandle, osWaitForever) == osOK)) {
 
-    if (osMutexAcquire(PipeQueueMutexHandle, osWaitForever) == osOK) {
+      bird_draw();
       pq_draw();
+
       osMutexRelease(PipeQueueMutexHandle);
+      osMutexRelease(BirdPosMutexHandle);
     }
 
     fb_draw_floor();
