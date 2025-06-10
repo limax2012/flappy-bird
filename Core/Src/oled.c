@@ -5,11 +5,14 @@
  *      Author: Max
  */
 
+#include <stdbool.h>
+#include <stdio.h>
 #include <string.h>
 
+#include "digits.h"
 #include "oled.h"
 
-static uint8_t fb[OLED_HEIGHT][OLED_WIDTH];
+static uint8_t fb[OLED_H][OLED_W];
 
 void oled_init(I2C_HandleTypeDef *hi2c) {
   uint8_t cmds[] = { 0x00,    // Control byte for commands
@@ -44,29 +47,56 @@ void fb_clear(void) {
   memset(fb, 0, sizeof(fb));
 }
 
-void fb_fill_rectangle(int x, int y, int w, int h) {
+void fb_fill_rect(int x, int y, int w, int h, bool filled) {
   for (int fb_y = y; fb_y < y + h; fb_y++) {
     for (int fb_x = x; fb_x < x + w; fb_x++) {
-      if (fb_y >= 0 && fb_y < OLED_HEIGHT && fb_x >= 0 && fb_x < OLED_WIDTH) {
-        fb[fb_y][fb_x] = 1;
+      if (fb_y >= 0 && fb_y < OLED_H && fb_x >= 0 && fb_x < OLED_W) {
+        fb[fb_y][fb_x] = filled;
       }
     }
   }
 }
 
 void fb_draw_floor(void) {
-  fb_fill_rectangle(0, OLED_HEIGHT - 1, OLED_WIDTH, 1);
+  fb_fill_rect(0, OLED_H - 1, OLED_W, 1, true);
+}
+
+void fb_draw_score(int score) {
+  // Left border
+  fb_fill_rect(0, 0, 1, DIGIT_BOX_H, false);
+
+  char buf[8];
+  snprintf(buf, sizeof(buf), "%d", score);
+
+  for (int d = 0; buf[d] != '\0'; d++) {
+    int digit = buf[d] - '0';
+    int base_x = d * DIGIT_BOX_W + 1;
+
+    // Top border
+    fb_fill_rect(base_x, 0, DIGIT_W, 1, false);
+    // Bottom border
+    fb_fill_rect(base_x, DIGIT_BOX_H - 1, DIGIT_W, 1, false);
+    // Right border
+    fb_fill_rect(base_x + DIGIT_W, 0, 1, DIGIT_BOX_H, false);
+
+    for (int i = 0; i < DIGIT_H; i++) {
+      uint8_t row_bits = digit_font[digit][i];
+      for (int j = 0; j < DIGIT_W; j++) {
+        fb[i + 1][base_x + j] = (row_bits >> (DIGIT_W - 1 - j)) & 1;
+      }
+    }
+  }
 }
 
 void oled_flush_fb(I2C_HandleTypeDef *hi2c) {
   // uint32_t flush_func_start = HAL_GetTick();
 
-  uint8_t flush_data[1 + (OLED_WIDTH / 8) * OLED_HEIGHT] = { 0 };
+  uint8_t flush_data[1 + (OLED_W / 8) * OLED_H] = { 0 };
   flush_data[0] = 0x40;
-  for (int fb_y = 0; fb_y < OLED_HEIGHT; fb_y++) {
-    for (int fb_x = 0; fb_x < OLED_WIDTH; fb_x++) {
-      int mirrored_fb_x = OLED_WIDTH - 1 - fb_x;
-      int oled_byte_index = 1 + ((mirrored_fb_x / 8) * OLED_HEIGHT) + fb_y;
+  for (int fb_y = 0; fb_y < OLED_H; fb_y++) {
+    for (int fb_x = 0; fb_x < OLED_W; fb_x++) {
+      int mirrored_fb_x = OLED_W - 1 - fb_x;
+      int oled_byte_index = 1 + ((mirrored_fb_x / 8) * OLED_H) + fb_y;
       flush_data[oled_byte_index] |= fb[fb_y][fb_x] << (mirrored_fb_x % 8);
     }
   }

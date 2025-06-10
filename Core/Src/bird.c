@@ -5,6 +5,8 @@
  *      Author: Max
  */
 
+#include <stdbool.h>
+
 #include "bird.h"
 #include "oled.h"
 
@@ -33,5 +35,5 @@ void bird_reset_vel(void) {
 }
 
 void bird_draw(void) {
-  fb_fill_rectangle(BIRD_POS_X, (int) pos_y, BIRD_W, BIRD_H);
+  fb_fill_rect(BIRD_POS_X, (int) pos_y, BIRD_W, BIRD_H, true);
 }

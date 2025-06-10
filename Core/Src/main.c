@@ -82,6 +82,7 @@ const osSemaphoreAttr_t JumpSemaphore_attributes = { .name = "JumpSemaphore" };
 
 bool game_paused = false;
 int pause_time = 0;
+int score = 0;
 
 /* USER CODE END PV */
 
@@ -102,8 +103,11 @@ void StartRenderTask(void *argument);
 /* USER CODE BEGIN 0 */
 
 void reset_game(void) {
+  score = 0;
+
   bird_reset_pos();
   bird_reset_vel();
+
   pq_clear();
   pq_enqueue();
 }
@@ -413,10 +417,14 @@ void StartGameTask(void *argument) {
       pq_update();
 
       if (pq_collision(BIRD_POS_X, bird_get_y(), BIRD_W, BIRD_H)
-          || (bird_get_y() + BIRD_H > OLED_HEIGHT - 1)) {
+          || (bird_get_y() + BIRD_H > OLED_H - 1)) {
 
         game_paused = true;
         pause_time = HAL_GetTick();
+      }
+
+      if (pq_scored(BIRD_POS_X)) {
+        score++;
       }
 
       osMutexRelease(PipeQueueMutexHandle);
@@ -444,7 +452,6 @@ void StartRenderTask(void *argument) {
     // uint32_t render_start = HAL_GetTick();
 
     fb_clear();
-    fb_draw_floor();
 
     if (osMutexAcquire(BirdPosMutexHandle, osWaitForever) == osOK) {
       bird_draw();
@@ -456,11 +463,14 @@ void StartRenderTask(void *argument) {
       osMutexRelease(PipeQueueMutexHandle);
     }
 
+    fb_draw_floor();
+    fb_draw_score(score);
+
     oled_flush_fb(&hi2c2);
 
     // uint32_t render_time = HAL_GetTick() - render_start;
 
-    vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(37));
+    vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(38));
   }
   /* USER CODE END StartRenderTask */
 }

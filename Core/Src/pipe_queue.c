@@ -15,6 +15,7 @@
 typedef struct Pipe {
   float x;
   float gap_top_y;
+  bool scored;
   struct Pipe *next;
 } Pipe;
 
@@ -41,8 +42,9 @@ void pq_enqueue() {
   float gap_top_y = PIPE_MIN_Y
       + (float) rand() / RAND_MAX * (PIPE_MAX_Y - PIPE_MIN_Y);
 
-  new_pipe->x = (float) OLED_WIDTH;
+  new_pipe->x = (float) OLED_W;
   new_pipe->gap_top_y = gap_top_y;
+  new_pipe->scored = false;
   new_pipe->next = NULL;
 
   if (pq.rear) {
@@ -75,11 +77,11 @@ void pq_update(void) {
     current_pipe = current_pipe->next;
   }
 
-  if (pq.rear && (OLED_WIDTH - pq.rear->x > PIPE_WIDTH + PIPE_SEPARATION)) {
+  if (pq.rear && (OLED_W - pq.rear->x > PIPE_W + PIPE_SEPARATION)) {
     pq_enqueue();
   }
 
-  while (pq.front && (pq.front->x < -PIPE_WIDTH)) {
+  while (pq.front && (pq.front->x < -PIPE_W)) {
     pq_dequeue();
   }
 }
@@ -98,24 +100,39 @@ void pq_draw() {
     int gap_top_y = (int) current_pipe->gap_top_y;
     int gap_bottom_y = gap_top_y + PIPE_GAP_SIZE;
 
-    fb_fill_rectangle(x, 0, PIPE_WIDTH, gap_top_y);
-    fb_fill_rectangle(x, gap_bottom_y, PIPE_WIDTH, OLED_HEIGHT - gap_bottom_y);
+    fb_fill_rect(x, 0, PIPE_W, gap_top_y, true);
+    fb_fill_rect(x, gap_bottom_y, PIPE_W, OLED_H - gap_bottom_y, true);
 
     current_pipe = current_pipe->next;
   }
 }
 
-bool pq_collision(float bird_x, float bird_y, int bird_w, int bird_h) {
+bool pq_collision(int bird_x, float bird_y, int bird_w, int bird_h) {
   Pipe *current_pipe = pq.front;
 
   while (current_pipe) {
     float pipe_x = current_pipe->x;
-    if ((bird_x + bird_w > pipe_x) && (bird_x < pipe_x + PIPE_WIDTH)) {
+    if ((bird_x + bird_w > pipe_x) && (bird_x < pipe_x + PIPE_W)) {
       float pipe_top = current_pipe->gap_top_y;
       if ((bird_y < pipe_top) || (bird_y + bird_h > pipe_top + PIPE_GAP_SIZE)) {
         return true;
       }
       break;
+    }
+
+    current_pipe = current_pipe->next;
+  }
+
+  return false;
+}
+
+bool pq_scored(int bird_x) {
+  Pipe *current_pipe = pq.front;
+
+  while (current_pipe) {
+    if (!current_pipe->scored && (current_pipe->x < bird_x)) {
+      current_pipe->scored = true;
+      return true;
     }
 
     current_pipe = current_pipe->next;
