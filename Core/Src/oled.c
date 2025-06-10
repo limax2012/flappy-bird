@@ -26,9 +26,9 @@ void oled_init(I2C_HandleTypeDef *hi2c) {
       0xA1,                   // Set segment re-map (mirror horizontally)
       0xC8,                   // Set COM output scan direction (remapped mode)
       0xDA, 0x12,             // Set COM pins hardware configuration
-      0x81, 0x7F,             // Set contrast control
-      0xD9, 0xF1,             // Set pre-charge period
-      0xDB, 0x40,             // Set VCOMH deselect level
+      0x81, 0x9F,             // Set contrast control
+      0xD9, 0x32,             // Set pre-charge period
+      0xDB, 0x20,             // Set VCOMH deselect level
       0xA4,                   // Resume display from RAM content
       0xA6,                   // Set normal display (not inverted)
       0x00, 0xB0, 0x00, 0x10, // Set addressing start to page 0 col 0
