@@ -23,9 +23,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 
-#include <math.h>
 #include <stdbool.h>
-#include <string.h>
 
 #include "bird.h"
 #include "oled.h"
@@ -427,8 +425,8 @@ void StartGameTask(void *argument) {
         score++;
       }
 
-      osMutexRelease(PipeQueueMutexHandle);
       osMutexRelease(BirdPosMutexHandle);
+      osMutexRelease(PipeQueueMutexHandle);
     }
 
     vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(10));
