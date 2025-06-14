@@ -13,8 +13,9 @@
 #include "oled.h"
 
 static uint8_t fb[OLED_H][OLED_W];
+static uint8_t flush_data[1 + (OLED_W / 8) * OLED_H];
 
-void oled_init(I2C_HandleTypeDef *hi2c) {
+void oled_init(I2C_HandleTypeDef *hi2c, osMutexId_t mutex_id) {
   uint8_t cmds[] = { 0x00,    // Control byte for commands
       0xAE,                   // Display OFF
       0xD5, 0x80,             // Set display clock divide ratio/osc frequency
@@ -34,13 +35,18 @@ void oled_init(I2C_HandleTypeDef *hi2c) {
       0x00, 0xB0, 0x00, 0x10, // Set addressing start to page 0 col 0
       0xAF                    // Display ON
       };
-
-  HAL_I2C_Master_Transmit(hi2c, SSD1306_I2C_ADDR << 1, cmds, sizeof(cmds), 100);
-  HAL_Delay(100);
-
   uint8_t set_start_addr[] = { 0x00, 0xB0, 0x00, 0x10 };
-  HAL_I2C_Master_Transmit(hi2c, SSD1306_I2C_ADDR << 1, set_start_addr,
-      sizeof(set_start_addr), 100);
+
+  if (osMutexAcquire(mutex_id, osWaitForever) == osOK) {
+    HAL_I2C_Master_Transmit(hi2c, SSD1306_I2C_ADDR << 1, cmds, sizeof(cmds),
+        100);
+    HAL_Delay(100);
+
+    HAL_I2C_Master_Transmit(hi2c, SSD1306_I2C_ADDR << 1, set_start_addr,
+        sizeof(set_start_addr), 100);
+
+    osMutexRelease(mutex_id);
+  }
 }
 
 void fb_clear(void) {
@@ -88,10 +94,10 @@ void fb_draw_score(int score) {
   }
 }
 
-void oled_flush_fb(I2C_HandleTypeDef *hi2c) {
+void oled_flush_fb(I2C_HandleTypeDef *hi2c, osMutexId_t mutex_id) {
   // uint32_t flush_func_start = HAL_GetTick();
 
-  uint8_t flush_data[1 + (OLED_W / 8) * OLED_H] = { 0 };
+  memset(flush_data, 0, sizeof(flush_data));
   flush_data[0] = 0x40;
   for (int fb_y = 0; fb_y < OLED_H; fb_y++) {
     for (int fb_x = 0; fb_x < OLED_W; fb_x++) {
@@ -103,8 +109,12 @@ void oled_flush_fb(I2C_HandleTypeDef *hi2c) {
 
   // uint32_t before_i2c = HAL_GetTick() - flush_func_start;
 
-  HAL_I2C_Master_Transmit(hi2c, SSD1306_I2C_ADDR << 1, flush_data,
-      sizeof(flush_data), 100);
+  if (osMutexAcquire(mutex_id, osWaitForever) == osOK) {
+    HAL_I2C_Master_Transmit(hi2c, SSD1306_I2C_ADDR << 1, flush_data,
+        sizeof(flush_data), 100);
+
+    osMutexRelease(mutex_id);
+  }
 
   // uint32_t after_i2c = HAL_GetTick() - flush_func_start;
   // uint32_t i2c_time = after_i2c - before_i2c;
