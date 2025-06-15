@@ -14,6 +14,7 @@
 
 static uint8_t fb[OLED_H][OLED_W];
 static uint8_t flush_data[1 + (OLED_W / 8) * OLED_H];
+static bool include_checkmark = false;
 
 void oled_init(I2C_HandleTypeDef *hi2c, osMutexId_t mutex_id) {
   uint8_t cmds[] = { 0x00,    // Control byte for commands
@@ -67,6 +68,7 @@ void fb_draw_floor(void) {
   fb_fill_rect(0, OLED_H - 1, OLED_W, 1, true);
 }
 
+// Assumption: score <= 999999
 void fb_draw_score(int score) {
   // Left border
   fb_fill_rect(0, 0, 1, DIGIT_BOX_H, false);
@@ -74,8 +76,14 @@ void fb_draw_score(int score) {
   char buf[8];
   snprintf(buf, sizeof(buf), "%d", score);
 
+  int len = strlen(buf);
+  if (include_checkmark) {
+    buf[len] = 'V';
+    buf[len + 1] = '\0';
+  }
+
   for (int d = 0; buf[d] != '\0'; d++) {
-    int digit = buf[d] - '0';
+    int digit = (buf[d] == 'V') ? 10 : (buf[d] - '0');
     int base_x = d * DIGIT_BOX_W + 1;
 
     // Top border
@@ -92,6 +100,10 @@ void fb_draw_score(int score) {
       }
     }
   }
+}
+
+void oled_set_checkmark_state(bool checkmark_state) {
+  include_checkmark = checkmark_state;
 }
 
 void oled_flush_fb(I2C_HandleTypeDef *hi2c, osMutexId_t mutex_id) {

@@ -27,6 +27,7 @@
 
 #include "bird.h"
 #include "bmp280.h"
+#include "comms.h"
 #include "oled.h"
 #include "pipe_queue.h"
 
@@ -40,8 +41,10 @@
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 
-#define JUMP_BUTTON_PORT GPIOA
+#define GPIO_PORT GPIOA
 #define JUMP_BUTTON_PIN GPIO_PIN_8
+#define SEND_READY_PIN GPIO_PIN_9
+#define PI_ACK_PIN GPIO_PIN_10
 #define DEBOUNCE_DELAY 50
 
 /* USER CODE END PD */
@@ -84,6 +87,9 @@ const osMutexAttr_t I2CMutex_attributes = { .name = "I2CMutex" };
 /* Definitions for JumpSemaphore */
 osSemaphoreId_t JumpSemaphoreHandle;
 const osSemaphoreAttr_t JumpSemaphore_attributes = { .name = "JumpSemaphore" };
+/* Definitions for PiAckSemaphore */
+osSemaphoreId_t PiAckSemaphoreHandle;
+const osSemaphoreAttr_t PiAckSemaphore_attributes = { .name = "PiAckSemaphore" };
 /* USER CODE BEGIN PV */
 
 volatile bool init_done = false;
@@ -118,6 +124,8 @@ void reset_game(void) {
 
   pq_clear();
   pq_enqueue();
+
+  oled_set_checkmark_state(false);
 }
 
 /* USER CODE END 0 */
@@ -178,6 +186,9 @@ int main(void) {
   /* Create the semaphores(s) */
   /* creation of JumpSemaphore */
   JumpSemaphoreHandle = osSemaphoreNew(1, 0, &JumpSemaphore_attributes);
+
+  /* creation of PiAckSemaphore */
+  PiAckSemaphoreHandle = osSemaphoreNew(1, 0, &PiAckSemaphore_attributes);
 
   /* USER CODE BEGIN RTOS_SEMAPHORES */
   /* add semaphores, ... */
@@ -347,15 +358,34 @@ static void MX_GPIO_Init(void) {
   __HAL_RCC_GPIOB_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
 
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_9, GPIO_PIN_RESET);
+
   /*Configure GPIO pin : PA8 */
   GPIO_InitStruct.Pin = GPIO_PIN_8;
   GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
   GPIO_InitStruct.Pull = GPIO_PULLUP;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
+  /*Configure GPIO pin : PA9 */
+  GPIO_InitStruct.Pin = GPIO_PIN_9;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : PA10 */
+  GPIO_InitStruct.Pin = GPIO_PIN_10;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
+  GPIO_InitStruct.Pull = GPIO_PULLDOWN;
+  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+
   /* EXTI interrupt init*/
   HAL_NVIC_SetPriority(EXTI9_5_IRQn, 5, 0);
   HAL_NVIC_EnableIRQ(EXTI9_5_IRQn);
+
+  HAL_NVIC_SetPriority(EXTI15_10_IRQn, 5, 0);
+  HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
 
   /* USER CODE BEGIN MX_GPIO_Init_2 */
 
@@ -367,6 +397,8 @@ static void MX_GPIO_Init(void) {
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
   if (GPIO_Pin == JUMP_BUTTON_PIN) {
     osSemaphoreRelease(JumpSemaphoreHandle);
+  } else if (GPIO_Pin == PI_ACK_PIN) {
+    osSemaphoreRelease(PiAckSemaphoreHandle);
   }
 }
 
@@ -389,8 +421,7 @@ void StartJumpButtonTask(void *argument) {
   /* Infinite loop */
   for (;;) {
     if (osSemaphoreAcquire(JumpSemaphoreHandle, osWaitForever) == osOK) {
-      if (HAL_GPIO_ReadPin(JUMP_BUTTON_PORT, JUMP_BUTTON_PIN)
-          == GPIO_PIN_RESET) {
+      if (HAL_GPIO_ReadPin(GPIO_PORT, JUMP_BUTTON_PIN) == GPIO_PIN_RESET) {
 
         if (!game_paused) {
           bird_reset_vel();
@@ -399,8 +430,7 @@ void StartJumpButtonTask(void *argument) {
           game_paused = false;
         }
 
-        while (HAL_GPIO_ReadPin(JUMP_BUTTON_PORT, JUMP_BUTTON_PIN)
-            == GPIO_PIN_RESET) {
+        while (HAL_GPIO_ReadPin(GPIO_PORT, JUMP_BUTTON_PIN) == GPIO_PIN_RESET) {
 
           osDelay(1);
         }
@@ -438,17 +468,25 @@ void StartGameTask(void *argument) {
       bird_update();
       pq_update();
 
+      if (pq_scored(BIRD_POS_X)) {
+        score++;
+      }
+
       if (pq_collision(BIRD_POS_X, bird_get_y(), BIRD_W, BIRD_H)
           || (bird_get_y() + BIRD_H > OLED_H - 1)) {
 
         game_paused = true;
         pause_time = HAL_GetTick();
 
-        int32_t temp = bmp280_get_temp(&hi2c2, I2CMutexHandle);
-      }
+        HAL_GPIO_WritePin(GPIO_PORT, SEND_READY_PIN, GPIO_PIN_SET);
 
-      if (pq_scored(BIRD_POS_X)) {
-        score++;
+        comms_send_score_temp(&hspi2, score,
+            bmp280_get_temp(&hi2c2, I2CMutexHandle));
+
+        if (osSemaphoreAcquire(PiAckSemaphoreHandle, osWaitForever) == osOK) {
+          HAL_GPIO_WritePin(GPIO_PORT, SEND_READY_PIN, GPIO_PIN_RESET);
+          oled_set_checkmark_state(true);
+        }
       }
 
       osMutexRelease(PipeQueueMutexHandle);
