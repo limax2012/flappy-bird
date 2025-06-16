@@ -2,11 +2,11 @@
 CAD.formats=
 CAD.pinconfig=
 CAD.provider=
-FREERTOS.BinarySemaphores01=JumpSemaphore,Dynamic,NULL,Depleted;PiAckSemaphore,Dynamic,NULL,Depleted
+FREERTOS.Events01=
 FREERTOS.FootprintOK=false
 FREERTOS.HEAP_NUMBER=4
-FREERTOS.IPParameters=Tasks01,configUSE_NEWLIB_REENTRANT,FootprintOK,BinarySemaphores01,configTOTAL_HEAP_SIZE,HEAP_NUMBER,Mutexes01
-FREERTOS.Mutexes01=BirdPosMutex,Dynamic,NULL,Depleted;PipeQueueMutex,Dynamic,NULL,Depleted;I2CMutex,Dynamic,NULL,Available
+FREERTOS.IPParameters=Tasks01,configUSE_NEWLIB_REENTRANT,FootprintOK,configTOTAL_HEAP_SIZE,HEAP_NUMBER,Mutexes01,Events01
+FREERTOS.Mutexes01=BirdPosMutex,Dynamic,NULL,Depleted;PipeQueueMutex,Dynamic,NULL,Depleted;I2CMutex,Dynamic,NULL,Depleted;ScoreMutex,Dynamic,NULL,Available
 FREERTOS.Tasks01=JumpButtonTask,40,128,StartJumpButtonTask,Default,NULL,Dynamic,NULL,NULL;GameTask,32,192,StartGameTask,Default,NULL,Dynamic,NULL,NULL;RenderTask,24,384,StartRenderTask,Default,NULL,Dynamic,NULL,NULL;InitTask,16,128,StartInitTask,Default,NULL,Dynamic,NULL,NULL
 FREERTOS.configTOTAL_HEAP_SIZE=4608
 FREERTOS.configUSE_NEWLIB_REENTRANT=1

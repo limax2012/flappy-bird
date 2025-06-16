@@ -45,6 +45,10 @@
 #define JUMP_BUTTON_PIN GPIO_PIN_8
 #define SEND_READY_PIN GPIO_PIN_9
 #define PI_ACK_PIN GPIO_PIN_10
+
+#define FLAG_JUMP_PRESS 0x01
+#define FLAG_PI_ACK 0x01
+
 #define DEBOUNCE_DELAY 50
 
 /* USER CODE END PD */
@@ -84,18 +88,17 @@ const osMutexAttr_t PipeQueueMutex_attributes = { .name = "PipeQueueMutex" };
 /* Definitions for I2CMutex */
 osMutexId_t I2CMutexHandle;
 const osMutexAttr_t I2CMutex_attributes = { .name = "I2CMutex" };
-/* Definitions for JumpSemaphore */
-osSemaphoreId_t JumpSemaphoreHandle;
-const osSemaphoreAttr_t JumpSemaphore_attributes = { .name = "JumpSemaphore" };
-/* Definitions for PiAckSemaphore */
-osSemaphoreId_t PiAckSemaphoreHandle;
-const osSemaphoreAttr_t PiAckSemaphore_attributes = { .name = "PiAckSemaphore" };
+/* Definitions for ScoreMutex */
+osMutexId_t ScoreMutexHandle;
+const osMutexAttr_t ScoreMutex_attributes = { .name = "ScoreMutex" };
 /* USER CODE BEGIN PV */
 
 volatile bool init_done = false;
 volatile bool game_paused = false;
+volatile bool last_frame = false;
+volatile bool data_sent = false;
 volatile int pause_time = 0;
-volatile int score = 0;
+int score = 0;
 
 /* USER CODE END PV */
 
@@ -117,15 +120,19 @@ void StartInitTask(void *argument);
 /* USER CODE BEGIN 0 */
 
 void reset_game(void) {
+  osMutexAcquire(ScoreMutexHandle, osWaitForever);
   score = 0;
+  osMutexRelease(ScoreMutexHandle);
+
+  last_frame = false;
+  data_sent = false;
+  oled_set_checkmark_state(false);
 
   bird_reset_pos();
   bird_reset_vel();
 
   pq_clear();
   pq_enqueue();
-
-  oled_set_checkmark_state(false);
 }
 
 /* USER CODE END 0 */
@@ -179,16 +186,12 @@ int main(void) {
   /* creation of I2CMutex */
   I2CMutexHandle = osMutexNew(&I2CMutex_attributes);
 
+  /* creation of ScoreMutex */
+  ScoreMutexHandle = osMutexNew(&ScoreMutex_attributes);
+
   /* USER CODE BEGIN RTOS_MUTEX */
   /* add mutexes, ... */
   /* USER CODE END RTOS_MUTEX */
-
-  /* Create the semaphores(s) */
-  /* creation of JumpSemaphore */
-  JumpSemaphoreHandle = osSemaphoreNew(1, 0, &JumpSemaphore_attributes);
-
-  /* creation of PiAckSemaphore */
-  PiAckSemaphoreHandle = osSemaphoreNew(1, 0, &PiAckSemaphore_attributes);
 
   /* USER CODE BEGIN RTOS_SEMAPHORES */
   /* add semaphores, ... */
@@ -396,9 +399,9 @@ static void MX_GPIO_Init(void) {
 
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
   if (GPIO_Pin == JUMP_BUTTON_PIN) {
-    osSemaphoreRelease(JumpSemaphoreHandle);
+    osThreadFlagsSet(JumpButtonTaskHandle, FLAG_JUMP_PRESS);
   } else if (GPIO_Pin == PI_ACK_PIN) {
-    osSemaphoreRelease(PiAckSemaphoreHandle);
+    osThreadFlagsSet(RenderTaskHandle, FLAG_PI_ACK);
   }
 }
 
@@ -420,23 +423,21 @@ void StartJumpButtonTask(void *argument) {
 
   /* Infinite loop */
   for (;;) {
-    if (osSemaphoreAcquire(JumpSemaphoreHandle, osWaitForever) == osOK) {
-      if (HAL_GPIO_ReadPin(GPIO_PORT, JUMP_BUTTON_PIN) == GPIO_PIN_RESET) {
+    osThreadFlagsWait(FLAG_JUMP_PRESS, osFlagsWaitAny, osWaitForever);
 
-        if (!game_paused) {
-          bird_reset_vel();
-        } else if ((HAL_GetTick() - pause_time) > 300) {
-          reset_game();
-          game_paused = false;
-        }
-
-        while (HAL_GPIO_ReadPin(GPIO_PORT, JUMP_BUTTON_PIN) == GPIO_PIN_RESET) {
-
-          osDelay(1);
-        }
-
-        osDelay(DEBOUNCE_DELAY);
+    if (HAL_GPIO_ReadPin(GPIO_PORT, JUMP_BUTTON_PIN) == GPIO_PIN_RESET) {
+      if (!game_paused) {
+        bird_reset_vel();
+      } else if ((HAL_GetTick() - pause_time) > 300) {
+        reset_game();
+        game_paused = false;
       }
+
+      while (HAL_GPIO_ReadPin(GPIO_PORT, JUMP_BUTTON_PIN) == GPIO_PIN_RESET) {
+        osDelay(1);
+      }
+
+      osDelay(DEBOUNCE_DELAY);
     }
   }
 
@@ -461,15 +462,17 @@ void StartGameTask(void *argument) {
 
   /* Infinite loop */
   for (;;) {
-    if (!game_paused
-        && (osMutexAcquire(BirdPosMutexHandle, osWaitForever) == osOK)
-        && (osMutexAcquire(PipeQueueMutexHandle, osWaitForever) == osOK)) {
+    if (!game_paused) {
+      osMutexAcquire(BirdPosMutexHandle, osWaitForever);
+      osMutexAcquire(PipeQueueMutexHandle, osWaitForever);
 
       bird_update();
       pq_update();
 
       if (pq_scored(BIRD_POS_X)) {
+        osMutexAcquire(ScoreMutexHandle, osWaitForever);
         score++;
+        osMutexRelease(ScoreMutexHandle);
       }
 
       if (pq_collision(BIRD_POS_X, bird_get_y(), BIRD_W, BIRD_H)
@@ -477,16 +480,6 @@ void StartGameTask(void *argument) {
 
         game_paused = true;
         pause_time = HAL_GetTick();
-
-        HAL_GPIO_WritePin(GPIO_PORT, SEND_READY_PIN, GPIO_PIN_SET);
-
-        comms_send_score_temp(&hspi2, score,
-            bmp280_get_temp(&hi2c2, I2CMutexHandle));
-
-        if (osSemaphoreAcquire(PiAckSemaphoreHandle, osWaitForever) == osOK) {
-          HAL_GPIO_WritePin(GPIO_PORT, SEND_READY_PIN, GPIO_PIN_RESET);
-          oled_set_checkmark_state(true);
-        }
       }
 
       osMutexRelease(PipeQueueMutexHandle);
@@ -519,22 +512,43 @@ void StartRenderTask(void *argument) {
   for (;;) {
     // uint32_t render_start = HAL_GetTick();
 
-    fb_clear();
-
-    if ((osMutexAcquire(BirdPosMutexHandle, osWaitForever) == osOK)
-        && (osMutexAcquire(PipeQueueMutexHandle, osWaitForever) == osOK)) {
-
-      bird_draw();
-      pq_draw();
-
-      osMutexRelease(PipeQueueMutexHandle);
-      osMutexRelease(BirdPosMutexHandle);
+    if (game_paused && !last_frame) {
+      last_frame = true;
     }
 
+    fb_clear();
+
+    osMutexAcquire(BirdPosMutexHandle, osWaitForever);
+    osMutexAcquire(PipeQueueMutexHandle, osWaitForever);
+
+    bird_draw();
+    pq_draw();
+
+    osMutexRelease(PipeQueueMutexHandle);
+    osMutexRelease(BirdPosMutexHandle);
+
     fb_draw_floor();
+
+    osMutexAcquire(ScoreMutexHandle, osWaitForever);
     fb_draw_score(score);
+    osMutexRelease(ScoreMutexHandle);
 
     oled_flush_fb(&hi2c2, I2CMutexHandle);
+
+    if (last_frame && !data_sent) {
+      osMutexAcquire(ScoreMutexHandle, osWaitForever);
+      int16_t data_score = (int16_t) score;
+      osMutexRelease(ScoreMutexHandle);
+
+      int16_t data_temp = (int16_t) bmp280_get_temp(&hi2c2, I2CMutexHandle);
+
+      comms_send_data(&hspi2, data_score, data_temp, GPIO_PORT, SEND_READY_PIN);
+
+      osThreadFlagsWait(FLAG_PI_ACK, osFlagsWaitAny, osWaitForever);
+
+      data_sent = true;
+      oled_set_checkmark_state(true);
+    }
 
     // uint32_t render_time = HAL_GetTick() - render_start;
 

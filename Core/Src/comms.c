@@ -7,16 +7,18 @@
 
 #include "comms.h"
 
-void comms_send_score_temp(SPI_HandleTypeDef *hspi, int score, int32_t temp) {
-  int16_t transfer_score = (int16_t) score;
-  int16_t transfer_temp = (int16_t) temp;
+void comms_send_data(SPI_HandleTypeDef *hspi, int16_t score, int16_t temp,
+    GPIO_TypeDef *ready_port, uint16_t ready_pin) {
 
-  uint8_t spi_payload[4] = { (uint8_t) (transfer_score >> 8),
-      (uint8_t) (transfer_score & 0xFF), (uint8_t) (transfer_temp >> 8),
-      (uint8_t) (transfer_temp & 0xFF) };
+  HAL_GPIO_WritePin(ready_port, ready_pin, GPIO_PIN_SET);
+
+  uint8_t spi_payload[4] = { (uint8_t) (score >> 8), (uint8_t) (score & 0xFF),
+      (uint8_t) (temp >> 8), (uint8_t) (temp & 0xFF) };
 
   uint8_t rx_placeholder[sizeof(spi_payload)] = { 0 };
 
   HAL_SPI_TransmitReceive(hspi, spi_payload, rx_placeholder,
       sizeof(spi_payload), 100);
+
+  HAL_GPIO_WritePin(ready_port, ready_pin, GPIO_PIN_RESET);
 }
