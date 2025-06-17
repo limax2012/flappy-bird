@@ -48,6 +48,7 @@
 
 #define FLAG_JUMP_PRESS 0x01
 #define FLAG_PI_ACK 0x01
+#define ACK_TIMEOUT pdMS_TO_TICKS(250)
 
 #define DEBOUNCE_DELAY 50
 
@@ -96,7 +97,7 @@ const osMutexAttr_t ScoreMutex_attributes = { .name = "ScoreMutex" };
 volatile bool init_done = false;
 volatile bool game_paused = false;
 volatile bool last_frame = false;
-volatile bool data_sent = false;
+volatile bool tried_data_send = false;
 volatile int pause_time = 0;
 int score = 0;
 
@@ -125,7 +126,7 @@ void reset_game(void) {
   osMutexRelease(ScoreMutexHandle);
 
   last_frame = false;
-  data_sent = false;
+  tried_data_send = false;
   oled_set_checkmark_state(false);
 
   bird_reset_pos();
@@ -535,7 +536,7 @@ void StartRenderTask(void *argument) {
 
     oled_flush_fb(&hi2c2, I2CMutexHandle);
 
-    if (last_frame && !data_sent) {
+    if (last_frame && !tried_data_send) {
       osMutexAcquire(ScoreMutexHandle, osWaitForever);
       int16_t data_score = (int16_t) score;
       osMutexRelease(ScoreMutexHandle);
@@ -544,10 +545,12 @@ void StartRenderTask(void *argument) {
 
       comms_send_data(&hspi2, data_score, data_temp, GPIO_PORT, SEND_READY_PIN);
 
-      osThreadFlagsWait(FLAG_PI_ACK, osFlagsWaitAny, osWaitForever);
+      tried_data_send = true;
 
-      data_sent = true;
-      oled_set_checkmark_state(true);
+      int32_t res = osThreadFlagsWait(FLAG_PI_ACK, osFlagsWaitAny, ACK_TIMEOUT);
+      if (res != osFlagsErrorTimeout) {
+        oled_set_checkmark_state(true);
+      }
     }
 
     // uint32_t render_time = HAL_GetTick() - render_start;
