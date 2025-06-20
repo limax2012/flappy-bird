@@ -45,4 +45,5 @@ The corresponding image on the Raspberry Pi Zero 2 W is a minimal Linux distribu
 ## Media
 
 ![Game Demo](Media/demo.gif)
-![Hardware Photo](Media/hardware.jpeg)
+
+![Hardware Photo](Media/hardware.JPEG)
