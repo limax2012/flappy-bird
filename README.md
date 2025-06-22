@@ -2,6 +2,10 @@
 
 This project is a FreeRTOS-based implementation of the classic Flappy Bird game targeting the STM32F103C8T6 microcontroller (Blue Pill). It uses an SSD1306 128x64 OLED display for graphics and a BMP280 sensor to read the ambient temperature. At the end of each game, the STM32 sends the score and temperature to a Raspberry Pi Zero 2 W, which then uploads the data to [Firebase](https://flappy-bird-scores-default-rtdb.firebaseio.com/.json).
 
+## Raspberry Pi Yocto layer
+
+The corresponding image on the Raspberry Pi Zero 2 W is a minimal Linux distribution modified by this [custom Yocto layer](https://github.com/limax2012/meta-custom). The hardware connections on the Raspberry Pi side can be found at that repository.
+
 ## Hardware usage
 
 - **STM32F103C8T6 microcontroller**: 
@@ -37,10 +41,6 @@ Game mechanics and rendering are implemented in the `Core` directory:
 - `bmp280.c` / `bmp280.h`
 
 The score digits and a checkmark glyph are defined in `digits.h`.
-
-## Raspberry Pi Yocto layer
-
-The corresponding image on the Raspberry Pi Zero 2 W is a minimal Linux distribution modified by this [custom Yocto layer](https://github.com/limax2012/meta-custom). The hardware connections on the Raspberry Pi side can be found at that repository.
 
 ## Media
 
